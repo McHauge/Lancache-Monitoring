@@ -314,6 +314,33 @@ func (d *RateLimitDoc) SetOverride(ip, rate string, exempt bool) error {
 	return nil
 }
 
+// SetGlobal updates the global limit_rate value. After migration this only
+// touches the empty-fallback line in the managed map block (rebuilt on Emit).
+// On an un-migrated file it also rewrites the user's `limit_rate <X>;` line
+// in place so the change actually takes effect on reload.
+func (d *RateLimitDoc) SetGlobal(rate string) error {
+	if err := validateRate(rate); err != nil {
+		return err
+	}
+	if rate == "0" {
+		// limit_rate 0; is valid nginx ("no limit"), but it'd defeat the
+		// purpose of this control — refuse so users don't accidentally
+		// disable rate limiting for everyone.
+		return fmt.Errorf("%w: global rate of 0 (unlimited) is not allowed — clear individual overrides instead", ErrInvalidRate)
+	}
+	d.Global = rate
+	if d.HasManaged {
+		return nil
+	}
+	m := limitRateLine.FindStringSubmatch(d.postManaged)
+	if m == nil {
+		return ErrNoLimitRate
+	}
+	indent := m[1]
+	d.postManaged = strings.Replace(d.postManaged, m[0], indent+"limit_rate "+rate+";", 1)
+	return nil
+}
+
 // ClearOverride removes any rate and exempt entry for ip.
 func (d *RateLimitDoc) ClearOverride(ip string) {
 	out := d.Overrides[:0]

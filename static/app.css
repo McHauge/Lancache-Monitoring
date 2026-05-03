@@ -457,10 +457,25 @@ body {
   margin: 0.5rem 0 0;
 }
 
+/* Editable global-rate cluster in the overrides card head */
+.global-rate-edit {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+}
+.global-rate-input {
+  width: 7rem;
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
+}
+
 /* Modal-like overlay for editing one override */
 .override-modal {
   position: fixed; inset: 0;
-  background: rgba(0,0,0,0.55);
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
   display: flex; align-items: center; justify-content: center;
   z-index: 100;
   padding: 1rem;

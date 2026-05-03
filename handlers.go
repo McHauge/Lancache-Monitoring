@@ -331,6 +331,59 @@ func (app *App) HandleRateLimitOverrideClear(w http.ResponseWriter, r *http.Requ
 	app.pushOverridesTable(sse)
 }
 
+// globalSignals is the request payload for /api/ratelimit/global.
+type globalSignals struct {
+	GlobalRate string `json:"globalRate"`
+}
+
+// HandleRateLimitGlobalSet rewrites the global limit_rate value (the empty
+// fallback in the managed map block, or the user's `limit_rate <X>;` line if
+// not yet migrated) and reloads.
+func (app *App) HandleRateLimitGlobalSet(w http.ResponseWriter, r *http.Request) {
+	var sigs globalSignals
+	if err := datastar.ReadSignals(r, &sigs); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	sse := datastar.NewSSE(w, r)
+
+	current, err := app.RateLim.Read()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "reading file: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Read failed", err.Error()))
+		return
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "parse: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Parse failed", err.Error()))
+		return
+	}
+	if err := doc.SetGlobal(sigs.GlobalRate); err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Invalid global rate", err.Error()))
+		return
+	}
+	out, err := doc.Emit()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "emit: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Emit failed", err.Error()))
+		return
+	}
+	app.saveAndReload(r.Context(), sse, out)
+	// On rollback the old value remains; on success the new one sticks. Re-read
+	// to push whichever ended up on disk so the input reflects reality.
+	if cur, err := app.RateLim.Read(); err == nil {
+		if d2, err := ParseDoc(cur); err == nil {
+			_ = sse.MarshalAndPatchSignals(map[string]any{"globalRate": d2.Global})
+		}
+	}
+}
+
 // HandleRateLimitMigrate adds the managed region to a previously-untouched
 // rate-limit.conf and reloads. No-op if the markers are already present.
 func (app *App) HandleRateLimitMigrate(w http.ResponseWriter, r *http.Request) {

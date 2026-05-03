@@ -259,6 +259,56 @@ func TestParseDoc_ConnLimitCustom(t *testing.T) {
 	}
 }
 
+func TestSetGlobal_OnMigrated(t *testing.T) {
+	d, _ := ParseDoc(validRateLimit)
+	d.Migrate()
+	if err := d.SetGlobal("5000k"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := d.Emit()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `""           5000k;`) {
+		t.Errorf("map fallback not updated: %s", out)
+	}
+	// Round-trip — re-parse picks up the new global.
+	d2, _ := ParseDoc(out)
+	if d2.Global != "5000k" {
+		t.Errorf("Global=%q, want 5000k", d2.Global)
+	}
+}
+
+func TestSetGlobal_OnRawFile(t *testing.T) {
+	d, _ := ParseDoc(validRateLimit)
+	if err := d.SetGlobal("8m"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Emit()
+	if !strings.Contains(out, "limit_rate 8m;") {
+		t.Errorf("user-section limit_rate not rewritten: %s", out)
+	}
+	if strings.Contains(out, "limit_rate 2500k;") {
+		t.Errorf("old global value still present")
+	}
+}
+
+func TestSetGlobal_RejectsZero(t *testing.T) {
+	d, _ := ParseDoc(validRateLimit)
+	d.Migrate()
+	if err := d.SetGlobal("0"); !errors.Is(err, ErrInvalidRate) {
+		t.Errorf("got %v, want ErrInvalidRate (zero global should be refused)", err)
+	}
+}
+
+func TestSetGlobal_RejectsBadRate(t *testing.T) {
+	d, _ := ParseDoc(validRateLimit)
+	d.Migrate()
+	if err := d.SetGlobal("fast"); !errors.Is(err, ErrInvalidRate) {
+		t.Errorf("got %v, want ErrInvalidRate", err)
+	}
+}
+
 func TestEmit_GlobalSyncedOnReParse(t *testing.T) {
 	// If the user manually edits the limit_rate fallback in the map block
 	// (not recommended, but possible), re-parsing should pick it up.

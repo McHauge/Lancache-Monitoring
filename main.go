@@ -277,6 +277,7 @@ func main() {
 	mux.Handle("/api/ratelimit/load", auth.Require(http.HandlerFunc(app.HandleRateLimitLoad)))
 	mux.Handle("/api/ratelimit/save", auth.Require(http.HandlerFunc(app.HandleRateLimitSave)))
 	mux.Handle("/api/ratelimit/migrate", auth.Require(http.HandlerFunc(app.HandleRateLimitMigrate)))
+	mux.Handle("/api/ratelimit/global", auth.Require(http.HandlerFunc(app.HandleRateLimitGlobalSet)))
 	mux.Handle("/api/ratelimit/override", auth.Require(http.HandlerFunc(app.HandleRateLimitOverrideSet)))
 	mux.Handle("/api/ratelimit/override/clear", auth.Require(http.HandlerFunc(app.HandleRateLimitOverrideClear)))
 

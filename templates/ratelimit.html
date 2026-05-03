@@ -1,6 +1,6 @@
 {{define "body"}}
 {{with .Body}}
-<div data-signals='{"rateLimitContent": {{.Content | printf "%q"}}, "reloadOutput": "", "reloadOK": null, "saving": false, "connLimit": {{.ConnLimit}}, "connLimitParsed": {{.ConnLimitParsed}}, "newOverride": {"ip": "", "rate": "", "totalRate": "", "exempt": false}, "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}}'>
+<div data-signals='{"rateLimitContent": {{.Content | printf "%q"}}, "reloadOutput": "", "reloadOK": null, "saving": false, "connLimit": {{.ConnLimit}}, "connLimitParsed": {{.ConnLimitParsed}}, "globalRate": "{{.Global}}", "newOverride": {"ip": "", "rate": "", "totalRate": "", "exempt": false}, "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}}'>
 
   {{if not .HasManaged}}
   <div class="glass-card migrate-banner">
@@ -20,7 +20,15 @@
   <div class="glass-card overrides-card">
     <div class="card-head">
       <h3>Per-IP overrides</h3>
-      <span class="muted">global rate: <span class="mono">{{if .Global}}{{.Global}}{{else}}—{{end}}</span></span>
+      <div class="global-rate-edit">
+        <span class="muted">global rate (per connection):</span>
+        <input class="lcm-input mono global-rate-input" data-bind="globalRate" placeholder="2500k">
+        <button class="btn-primary btn-sm"
+                data-attr:disabled="!$globalRate"
+                data-on:click="@post('/api/ratelimit/global')">
+          Save
+        </button>
+      </div>
     </div>
 
     <div class="overrides-help">
