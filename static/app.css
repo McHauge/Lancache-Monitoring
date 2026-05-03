@@ -329,6 +329,187 @@ body {
   font-size: 0.85rem;
 }
 
+/* ---- Per-IP overrides ---- */
+.override-pill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(var(--theme-accent-rgb), 0.15);
+  color: rgba(255,255,255,0.9);
+  border: 1px solid rgba(var(--theme-accent-rgb), 0.35);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin-right: 0.4rem;
+}
+.override-pill--unlimited {
+  background: rgba(74,222,128,0.15);
+  color: #4ade80;
+  border-color: rgba(74,222,128,0.35);
+}
+.override-pill--exempt {
+  background: rgba(250,204,21,0.15);
+  color: #facc15;
+  border-color: rgba(250,204,21,0.35);
+}
+.btn-sm {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.75rem;
+  border-radius: 0.4rem;
+}
+.btn-danger {
+  border-color: rgba(248,113,113,0.4);
+  color: #fca5a5;
+}
+.btn-danger:hover {
+  background: rgba(248,113,113,0.12);
+  color: #fecaca;
+}
+.lcm-input {
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  color: #fff;
+  font-size: 0.85rem;
+  font-family: inherit;
+  width: 100%;
+}
+.lcm-input:focus {
+  outline: none;
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 2px rgba(var(--theme-accent-rgb), 0.15);
+}
+.lcm-checkbox {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: rgba(255,255,255,0.8);
+}
+.lcm-checkbox input[type="checkbox"] {
+  accent-color: var(--theme-accent);
+}
+
+/* Migration banner on /ratelimit when the managed block is missing */
+.migrate-banner {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  background: rgba(var(--theme-accent-rgb), 0.08);
+  border-color: rgba(var(--theme-accent-rgb), 0.25);
+}
+.migrate-banner__text { flex: 1; font-size: 0.85rem; color: rgba(255,255,255,0.8); }
+.migrate-banner__text strong { color: #fff; }
+.migrate-banner__text p { margin: 0.35rem 0 0; }
+.migrate-banner__text code {
+  background: rgba(255,255,255,0.07);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
+}
+
+/* Per-IP overrides card */
+.overrides-card { padding: 1.25rem 1.5rem; }
+.overrides-help {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.6);
+  margin-bottom: 0.75rem;
+}
+.overrides-help code {
+  background: rgba(255,255,255,0.07);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.78rem;
+}
+.overrides-table .overrides-add-row td { border-top: 1px solid rgba(255,255,255,0.1); }
+.overrides-table input.lcm-input { min-width: 12rem; }
+
+/* Coupled Total / Per-connection rate inputs */
+.rate-couple {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.6rem;
+}
+.rate-couple__col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.rate-couple__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.rate-couple__op {
+  align-self: center;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.5);
+  white-space: nowrap;
+  padding-bottom: 0.4rem;
+}
+.rate-couple--compact { align-items: center; gap: 0.4rem; }
+.rate-couple--compact .lcm-input { min-width: 8rem; }
+.rate-couple__warn {
+  font-size: 0.78rem;
+  color: #fbbf24;
+  margin: 0.5rem 0 0;
+}
+
+/* Modal-like overlay for editing one override */
+.override-modal {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+.override-modal__inner {
+  width: 100%;
+  max-width: 28rem;
+  margin: 0;
+}
+.override-modal__field { margin-bottom: 0.85rem; }
+.override-modal__field > label {
+  display: block;
+  font-size: 0.8rem;
+  color: rgba(255,255,255,0.6);
+  margin-bottom: 0.35rem;
+}
+.override-modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Collapsed raw-editor <details> wrapper on /ratelimit */
+details.editor-card { padding: 0; }
+details.editor-card > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 1rem 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: 0.75rem;
+}
+details.editor-card > summary::-webkit-details-marker { display: none; }
+details.editor-card > summary::after {
+  content: "▸";
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.5);
+  transition: transform 0.2s;
+}
+details.editor-card[open] > summary::after { transform: rotate(90deg); }
+details.editor-card > summary > h3 { margin: 0; font-size: 1rem; font-weight: 600; }
+details.editor-card[open] {
+  padding: 0 1.5rem 1.25rem;
+}
+details.editor-card[open] > summary { padding: 1rem 0; }
+
 /* ---- Toaster (basecoat dispatches a CustomEvent that this region picks up) ---- */
 .toaster {
   position: fixed;

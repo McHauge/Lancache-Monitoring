@@ -46,18 +46,88 @@ func (app *App) HandleRateLimitPage(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("reading %s: %v", app.RateLim.Path, err)
 		current = "# ERROR: could not read " + app.RateLim.Path + "\n# " + err.Error() + "\n"
 	}
+	doc, _ := ParseDoc(current)
 	data := pageData{
 		ThemeCSS: app.ThemeCSS,
 		Page:     "ratelimit",
 		Title:    "Rate Limits — Lancache Monitor",
 		Body: map[string]any{
-			"Path":    app.RateLim.Path,
-			"Content": current,
+			"Path":            app.RateLim.Path,
+			"Content":         current,
+			"HasManaged":      doc.HasManaged,
+			"Global":          doc.Global,
+			"Overrides":       doc.Overrides,
+			"ConnLimit":       doc.ConnLimit,
+			"ConnLimitParsed": doc.ConnLimitParsed,
+			"OverridesBody":   htmltemplate.HTML(renderOverrideRows(doc.Overrides)),
 		},
 	}
 	if err := app.RateLimitTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Errorf("render ratelimit: %v", err)
 	}
+}
+
+// renderOverrideRows builds the <tbody id="overrides-body"> for the
+// per-IP overrides table on /ratelimit. Used both for the initial page
+// render and for SSE patches after a save so the table reflects on-disk
+// state without a full reload. Element ID stays constant so Datastar's
+// morph targets it on every push.
+func renderOverrideRows(overrides []Override) string {
+	var b strings.Builder
+	b.WriteString(`<tbody id="overrides-body">`)
+	if len(overrides) == 0 {
+		b.WriteString(`<tr><td colspan="4" class="empty-state">No per-IP overrides set.</td></tr>`)
+	} else {
+		for _, o := range overrides {
+			ip := htmlEscape(o.IP)
+			rateCell := `<span class="muted">—</span>`
+			switch o.Rate {
+			case "":
+				// keep the dash
+			case "0":
+				rateCell = "unlimited"
+			default:
+				rateCell = htmlEscape(o.Rate)
+			}
+			exemptCell := `<span class="muted">no</span>`
+			exemptJS := "false"
+			if o.Exempt {
+				exemptCell = `<span class="ok-pill">yes</span>`
+				exemptJS = "true"
+			}
+			editClick := fmt.Sprintf(
+				`$override.ip=%q; $override.rate=%q; $override.totalRate=window.lcmRate.multiply(%q, $connLimit); $override.exempt=%s; $override.open=true`,
+				o.IP, o.Rate, o.Rate, exemptJS,
+			)
+			clearClick := fmt.Sprintf(
+				`$override.ip=%q; @post('/api/ratelimit/override/clear')`,
+				o.IP,
+			)
+			fmt.Fprintf(&b,
+				`<tr><td class="mono">%s</td><td class="mono">%s</td><td>%s</td><td class="num"><button class="btn-ghost btn-sm" data-on:click="%s">Edit</button> <button class="btn-ghost btn-sm btn-danger" data-on:click="%s">Clear</button></td></tr>`,
+				ip, rateCell, exemptCell, htmlEscape(editClick), htmlEscape(clearClick))
+		}
+	}
+	b.WriteString(`</tbody>`)
+	return b.String()
+}
+
+// pushOverridesTable re-reads the rate-limit file and morphs the
+// `<tbody id="overrides-body">` on the rate-limit page so the table
+// reflects what's now on disk. Called from each override endpoint after
+// a save attempt — works whether the save succeeded (new state) or
+// rolled back (previous state). Errors are swallowed; the table just
+// won't refresh, which is no worse than today.
+func (app *App) pushOverridesTable(sse *datastar.ServerSentEventGenerator) {
+	current, err := app.RateLim.Read()
+	if err != nil {
+		return
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		return
+	}
+	_ = sse.PatchElements(renderOverrideRows(doc.Overrides))
 }
 
 // HandleRateLimitLoad pushes the current file contents into $rateLimitContent.
@@ -95,8 +165,18 @@ func (app *App) HandleRateLimitSave(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sse := datastar.NewSSE(w, r)
+	app.saveAndReload(r.Context(), sse, sigs.RateLimitContent)
+}
 
-	if err := SanityCheck(sigs.RateLimitContent); err != nil {
+// saveAndReload writes content, runs nginx -t && nginx -s reload via docker
+// exec, and rolls back on any failure. All status is reported via SSE
+// signals (`reloadOK`, `reloadOutput`) plus a toast.
+//
+// Caller is responsible for sanity-checking the content shape they expect
+// (e.g., that override mutations preserve required directives) — this helper
+// runs the file-level SanityCheck and trusts whatever nginx reports.
+func (app *App) saveAndReload(ctx context.Context, sse *datastar.ServerSentEventGenerator, content string) {
+	if err := SanityCheck(content); err != nil {
 		_ = sse.MarshalAndPatchSignals(map[string]any{
 			"reloadOK":     false,
 			"reloadOutput": err.Error(),
@@ -105,7 +185,7 @@ func (app *App) HandleRateLimitSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	backup, err := app.RateLim.Write(sigs.RateLimitContent)
+	backup, err := app.RateLim.Write(content)
 	if err != nil {
 		_ = sse.MarshalAndPatchSignals(map[string]any{
 			"reloadOK":     false,
@@ -115,9 +195,9 @@ func (app *App) HandleRateLimitSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	result, err := app.Reloader.Reload(ctx)
+	result, err := app.Reloader.Reload(rctx)
 	if err != nil {
 		// Docker call itself failed (socket missing, container missing, etc.)
 		// — file is already written, but nginx never reloaded. Roll back so
@@ -154,6 +234,139 @@ func (app *App) HandleRateLimitSave(w http.ResponseWriter, r *http.Request) {
 		"nginx accepted the new config and reloaded."))
 }
 
+// overrideSignals is the request payload for /api/ratelimit/override*.
+// All fields are nested under `override` so the dashboard popover can drive
+// them with `data-bind:override.*` signals.
+type overrideSignals struct {
+	Override struct {
+		IP     string `json:"ip"`
+		Rate   string `json:"rate"`
+		Exempt bool   `json:"exempt"`
+	} `json:"override"`
+}
+
+// HandleRateLimitOverrideSet upserts a per-IP override and reloads nginx.
+// Empty rate = no bandwidth override; exempt may still be true.
+func (app *App) HandleRateLimitOverrideSet(w http.ResponseWriter, r *http.Request) {
+	var sigs overrideSignals
+	if err := datastar.ReadSignals(r, &sigs); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	sse := datastar.NewSSE(w, r)
+
+	current, err := app.RateLim.Read()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "reading file: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Read failed", err.Error()))
+		return
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "parse: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Parse failed", err.Error()))
+		return
+	}
+	if !doc.HasManaged && sigs.Override.Rate != "" {
+		// Setting a custom bandwidth requires the managed block — auto-migrate.
+		if err := doc.Migrate(); err != nil {
+			_ = sse.MarshalAndPatchSignals(map[string]any{
+				"reloadOK": false, "reloadOutput": "migrate: " + err.Error()})
+			_ = sse.ExecuteScript(toastJS("error", "Cannot enable overrides", err.Error()))
+			return
+		}
+	}
+	if err := doc.SetOverride(sigs.Override.IP, sigs.Override.Rate, sigs.Override.Exempt); err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Invalid override", err.Error()))
+		return
+	}
+	out, err := doc.Emit()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "emit: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Emit failed", err.Error()))
+		return
+	}
+	app.saveAndReload(r.Context(), sse, out)
+	app.pushOverridesTable(sse)
+}
+
+// HandleRateLimitOverrideClear removes any override (rate + exempt) for the
+// given IP and reloads nginx.
+func (app *App) HandleRateLimitOverrideClear(w http.ResponseWriter, r *http.Request) {
+	var sigs overrideSignals
+	if err := datastar.ReadSignals(r, &sigs); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	sse := datastar.NewSSE(w, r)
+
+	current, err := app.RateLim.Read()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "reading file: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Read failed", err.Error()))
+		return
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "parse: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Parse failed", err.Error()))
+		return
+	}
+	doc.ClearOverride(sigs.Override.IP)
+	out, err := doc.Emit()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "emit: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Emit failed", err.Error()))
+		return
+	}
+	app.saveAndReload(r.Context(), sse, out)
+	app.pushOverridesTable(sse)
+}
+
+// HandleRateLimitMigrate adds the managed region to a previously-untouched
+// rate-limit.conf and reloads. No-op if the markers are already present.
+func (app *App) HandleRateLimitMigrate(w http.ResponseWriter, r *http.Request) {
+	sse := datastar.NewSSE(w, r)
+
+	current, err := app.RateLim.Read()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "reading file: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Read failed", err.Error()))
+		return
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "parse: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Parse failed", err.Error()))
+		return
+	}
+	if err := doc.Migrate(); err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Migrate failed", err.Error()))
+		return
+	}
+	out, err := doc.Emit()
+	if err != nil {
+		_ = sse.MarshalAndPatchSignals(map[string]any{
+			"reloadOK": false, "reloadOutput": "emit: " + err.Error()})
+		_ = sse.ExecuteScript(toastJS("error", "Emit failed", err.Error()))
+		return
+	}
+	app.saveAndReload(r.Context(), sse, out)
+	app.pushOverridesTable(sse)
+}
+
 // HandleDashboardStream is a long-lived SSE that pushes dashboard updates
 // every two seconds. It returns when the client disconnects. Scalar values
 // are sent as Datastar signals; tabular data is rendered server-side and
@@ -165,6 +378,7 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 	push := func() error {
 		ips := app.Live.SnapshotIPs()
 		hosts := app.Live.SnapshotHosts()
+		overrides, connLimit, connLimitParsed := readOverridesAndConnLimit(app.RateLim)
 
 		minutes, err := app.Agg.LastMinutes(60)
 		if err != nil {
@@ -200,15 +414,17 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 				"hitPct":     int(day.ByteHitRatio() * 100),
 				"requests":   day.RequestsTotal(),
 			},
-			"activeCount": len(ips),
-			"updated":     time.Now().Format("15:04:05"),
+			"activeCount":     len(ips),
+			"updated":         time.Now().Format("15:04:05"),
+			"connLimit":       connLimit,
+			"connLimitParsed": connLimitParsed,
 		}
 		if err := sse.MarshalAndPatchSignals(signals); err != nil {
 			return err
 		}
 
 		// Render and patch the IP table body.
-		if err := sse.PatchElements(renderIPRows(ips)); err != nil {
+		if err := sse.PatchElements(renderIPRows(ips, overrides)); err != nil {
 			return err
 		}
 		// Render and patch the host table body.
@@ -242,26 +458,84 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 const maxIPRows = 30
 const maxHostRows = 20
 
+// readOverridesAndConnLimit loads the current per-IP overrides plus the
+// `limit_conn perip` value (and whether it was actually parsed or fell back
+// to the default). On any read/parse failure it returns the default conn
+// limit with parsed=false and a nil override map.
+func readOverridesAndConnLimit(rl *RateLimitFile) (map[string]Override, int, bool) {
+	current, err := rl.Read()
+	if err != nil {
+		return nil, defaultConnLimit, false
+	}
+	doc, err := ParseDoc(current)
+	if err != nil {
+		return nil, defaultConnLimit, false
+	}
+	out := make(map[string]Override, len(doc.Overrides))
+	for _, o := range doc.Overrides {
+		out[o.IP] = o
+	}
+	return out, doc.ConnLimit, doc.ConnLimitParsed
+}
+
 // renderIPRows builds the <tbody id="active-ips-body"> fragment that morphs
 // into the dashboard. Datastar matches by element ID and replaces children.
-func renderIPRows(ips []IPSnapshot) string {
+// Each row carries a per-IP Limit cell with a button that arms the page-level
+// `$override` signal so the shared editor modal opens pre-populated.
+func renderIPRows(ips []IPSnapshot, overrides map[string]Override) string {
 	var b strings.Builder
 	b.WriteString(`<tbody id="active-ips-body">`)
 	if len(ips) == 0 {
-		b.WriteString(`<tr><td colspan="6" class="empty-state">No active clients in the last 5 minutes.</td></tr>`)
+		b.WriteString(`<tr><td colspan="7" class="empty-state">No active clients in the last 5 minutes.</td></tr>`)
 	} else {
 		for i, s := range ips {
 			if i >= maxIPRows {
 				break
 			}
+			ov, has := overrides[s.IP]
+			limitCell := overrideCell(s.IP, ov, has)
 			fmt.Fprintf(&b,
-				`<tr><td class="mono">%s</td><td class="mono">%s</td><td class="num">%s</td><td class="num">%d</td><td class="num">%d%%</td><td class="muted">%s</td></tr>`,
+				`<tr><td class="mono">%s</td><td class="mono">%s</td><td class="num">%s</td><td class="num">%d</td><td class="num">%d%%</td><td class="muted">%s</td><td>%s</td></tr>`,
 				htmlEscape(s.IP), htmlEscape(s.TopHost), humanBytes(s.Bytes),
-				s.Requests, int(s.HitRatio*100), humanAgo(time.Since(s.LastSeen)))
+				s.Requests, int(s.HitRatio*100), humanAgo(time.Since(s.LastSeen)),
+				limitCell)
 		}
 	}
 	b.WriteString(`</tbody>`)
 	return b.String()
+}
+
+// overrideCell renders the Limit-column body for one IP row: a small badge
+// describing the current override (if any) plus an "Edit" button that arms
+// the shared `$override` signal so the page-level modal opens pre-filled.
+// `data-on:click` JSON-encodes the IP so it survives quoting.
+func overrideCell(ip string, ov Override, has bool) string {
+	var badge string
+	switch {
+	case has && ov.Rate != "" && ov.Rate != "0":
+		badge = `<span class="override-pill">` + htmlEscape(ov.Rate) + `</span>`
+	case has && ov.Rate == "0":
+		badge = `<span class="override-pill override-pill--unlimited">unlimited</span>`
+	case has && ov.Exempt:
+		badge = `<span class="override-pill override-pill--exempt">exempt</span>`
+	default:
+		badge = `<span class="muted">—</span>`
+	}
+	rate := htmlEscape(ov.Rate)
+	exempt := "false"
+	if ov.Exempt {
+		exempt = "true"
+	}
+	// totalRate is computed client-side from the per-connection rate so it
+	// stays in sync with $connLimit (which the dashboard SSE pushes).
+	click := fmt.Sprintf(
+		`$override.ip=%q; $override.rate=%q; $override.totalRate=window.lcmRate.multiply(%q, $connLimit); $override.exempt=%s; $override.open=true`,
+		ip, rate, rate, exempt,
+	)
+	return fmt.Sprintf(
+		`%s <button class="btn-ghost btn-sm" data-on:click="%s">Edit</button>`,
+		badge, htmlEscape(click),
+	)
 }
 
 func renderHostRows(hosts []HostSnapshot) string {

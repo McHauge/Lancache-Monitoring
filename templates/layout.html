@@ -9,6 +9,44 @@
     <link rel="stylesheet" href="/static/vendor/basecoat.min.css">
     <style>{{.ThemeCSS}}</style>
     <link rel="stylesheet" href="/static/app.css">
+    <script>
+      // Convert between "total client bandwidth" and "per-connection rate".
+      // nginx applies limit_rate per-connection, but users tend to think in
+      // total terms — so the override modals let you edit either side and
+      // keep them coupled via these helpers. Suffixes use nginx's binary
+      // multipliers: k = 1024, m = 1024*1024.
+      window.lcmRate = {
+        parse(str) {
+          if (str === null || str === undefined) return null;
+          const m = String(str).trim().match(/^(\d+)([kKmM])?$/);
+          if (!m) return null;
+          let n = parseInt(m[1], 10);
+          const u = (m[2] || '').toLowerCase();
+          if (u === 'k') n *= 1024;
+          else if (u === 'm') n *= 1024 * 1024;
+          return n;
+        },
+        format(n) {
+          if (!Number.isFinite(n) || n < 0) return '';
+          if (n === 0) return '0';
+          if (n % (1024 * 1024) === 0) return (n / (1024 * 1024)) + 'm';
+          if (n % 1024 === 0) return (n / 1024) + 'k';
+          return String(Math.floor(n));
+        },
+        divide(str, factor) {
+          const n = this.parse(str);
+          if (n === null || !factor) return '';
+          if (n === 0) return '0';
+          return this.format(Math.floor(n / factor));
+        },
+        multiply(str, factor) {
+          const n = this.parse(str);
+          if (n === null || !factor) return '';
+          if (n === 0) return '0';
+          return this.format(n * factor);
+        },
+      };
+    </script>
     <script src="/static/vendor/basecoat.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
     <script type="module" src="/static/vendor/datastar.js"></script>

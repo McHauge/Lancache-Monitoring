@@ -1,12 +1,130 @@
 {{define "body"}}
 {{with .Body}}
-<div data-signals='{"rateLimitContent": {{.Content | printf "%q"}}, "reloadOutput": "", "reloadOK": null, "saving": false}'>
+<div data-signals='{"rateLimitContent": {{.Content | printf "%q"}}, "reloadOutput": "", "reloadOK": null, "saving": false, "connLimit": {{.ConnLimit}}, "connLimitParsed": {{.ConnLimitParsed}}, "newOverride": {"ip": "", "rate": "", "totalRate": "", "exempt": false}, "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}}'>
 
-  <div class="glass-card editor-card">
-    <div class="card-head">
-      <h3>Rate-limit config</h3>
-      <span class="muted mono">{{.Path}}</span>
+  {{if not .HasManaged}}
+  <div class="glass-card migrate-banner">
+    <div class="migrate-banner__text">
+      <strong>Per-IP overrides are not enabled in this config yet.</strong>
+      <p>Click below to add a managed block (`geo $lcm_rate_override`) and rewrite
+        your <code>limit_rate</code> directive so the monitor can set custom
+        per-IP rates. Your existing content stays editable in the raw editor.</p>
     </div>
+    <button class="btn-primary"
+            data-on:click="@post('/api/ratelimit/migrate')">
+      Enable per-IP overrides
+    </button>
+  </div>
+  {{end}}
+
+  <div class="glass-card overrides-card">
+    <div class="card-head">
+      <h3>Per-IP overrides</h3>
+      <span class="muted">global rate: <span class="mono">{{if .Global}}{{.Global}}{{else}}—{{end}}</span></span>
+    </div>
+
+    <div class="overrides-help">
+      <p>Custom rate uses nginx units (<code>5000k</code>, <code>2m</code>) or <code>0</code> for unlimited.
+        nginx applies <code>limit_rate</code> per connection, so a client with
+        <code>limit_conn perip {{.ConnLimit}}</code> downloading in parallel can
+        receive up to {{.ConnLimit}}× the per-connection value. Use the dual
+        Total / Per-connection inputs below so you can specify whichever side
+        is more natural.
+        <em>Exempt</em> additionally removes the IP from the connection-count limit.
+        Clear an entry to fall back to the global rate.</p>
+      {{if not .ConnLimitParsed}}
+      <p class="rate-couple__warn">
+        Could not find <code>limit_conn perip N;</code> in your config —
+        assuming the lancache default of <strong>{{.ConnLimit}}</strong>.
+      </p>
+      {{end}}
+    </div>
+
+    <table class="lcm-table overrides-table">
+      <thead>
+        <tr>
+          <th>IP / CIDR</th>
+          <th>Custom rate</th>
+          <th>Exempt</th>
+          <th class="num">Actions</th>
+        </tr>
+      </thead>
+      {{.OverridesBody}}
+      <tbody>
+        <tr class="overrides-add-row">
+          <td><input class="lcm-input mono" data-bind="newOverride.ip" placeholder="10.0.0.5"></td>
+          <td>
+            <div class="rate-couple rate-couple--compact">
+              <input class="lcm-input mono" data-bind="newOverride.totalRate"
+                     data-on:input="$newOverride.rate = window.lcmRate.divide($newOverride.totalRate, $connLimit)"
+                     placeholder="total: 100m">
+              <span class="rate-couple__op muted mono" data-text="'/ ' + $connLimit + ' ='"></span>
+              <input class="lcm-input mono" data-bind="newOverride.rate"
+                     data-on:input="$newOverride.totalRate = window.lcmRate.multiply($newOverride.rate, $connLimit)"
+                     placeholder="per-conn: 10m">
+            </div>
+          </td>
+          <td><label class="lcm-checkbox"><input type="checkbox" data-bind="newOverride.exempt"> exempt</label></td>
+          <td class="num">
+            <button class="btn-primary btn-sm"
+                    data-attr:disabled="!$newOverride.ip"
+                    data-on:click="$override.ip=$newOverride.ip; $override.rate=$newOverride.rate; $override.exempt=$newOverride.exempt; @post('/api/ratelimit/override'); $newOverride.ip=''; $newOverride.rate=''; $newOverride.totalRate=''; $newOverride.exempt=false">
+              Add
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Edit modal — driven by the $override signal, also armed from dashboard rows. -->
+  <div class="override-modal" data-show="$override.open">
+    <div class="override-modal__inner glass-card">
+      <div class="card-head">
+        <h3>Edit override for <span class="mono" data-text="$override.ip"></span></h3>
+      </div>
+      <div class="override-modal__field">
+        <label>Custom rate <span class="muted">(<code>limit_rate</code> is per-connection — edit either field)</span></label>
+        <div class="rate-couple">
+          <div class="rate-couple__col">
+            <span class="rate-couple__label muted">Total bandwidth</span>
+            <input class="lcm-input mono" data-bind="override.totalRate"
+                   data-on:input="$override.rate = window.lcmRate.divide($override.totalRate, $connLimit)"
+                   placeholder="100m or 0">
+          </div>
+          <span class="rate-couple__op mono" data-text="'/ ' + $connLimit + ' ='"></span>
+          <div class="rate-couple__col">
+            <span class="rate-couple__label muted">Per connection</span>
+            <input class="lcm-input mono" data-bind="override.rate"
+                   data-on:input="$override.totalRate = window.lcmRate.multiply($override.rate, $connLimit)"
+                   placeholder="10m or 0">
+          </div>
+        </div>
+      </div>
+      <div class="override-modal__field">
+        <label class="lcm-checkbox">
+          <input type="checkbox" data-bind="override.exempt"> Exempt from connection-count limit
+        </label>
+      </div>
+      <div class="override-modal__actions">
+        <button class="btn-primary"
+                data-on:click="@post('/api/ratelimit/override'); $override.open=false">
+          Save
+        </button>
+        <button class="btn-ghost btn-danger"
+                data-on:click="@post('/api/ratelimit/override/clear'); $override.open=false">
+          Clear override
+        </button>
+        <button class="btn-ghost"
+                data-on:click="$override.open=false">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <details class="glass-card editor-card">
+    <summary><h3>Edit raw config</h3><span class="muted mono">{{.Path}}</span></summary>
 
     <div class="editor-help">
       <p>This file is mounted into the lancache container at
@@ -33,7 +151,7 @@
         Reload from disk
       </button>
     </div>
-  </div>
+  </details>
 
   <div class="glass-card output-card" data-show="$reloadOutput !== ''">
     <div class="card-head">

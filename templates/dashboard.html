@@ -1,5 +1,5 @@
 {{define "body"}}
-<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "updated": ""}'
+<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "updated": "", "connLimit": 10, "connLimitParsed": false, "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}}'
      data-init="@get('/api/dashboard')">
 
   <div class="stats-grid">
@@ -35,13 +35,62 @@
     </div>
   </div>
 
+  <!-- Edit modal — armed by per-row Edit buttons rendered server-side. -->
+  <div class="override-modal" data-show="$override.open">
+    <div class="override-modal__inner glass-card">
+      <div class="card-head">
+        <h3>Set rate limit for <span class="mono" data-text="$override.ip"></span></h3>
+      </div>
+      <div class="override-modal__field">
+        <label>Custom rate <span class="muted">(nginx applies <code>limit_rate</code> per connection — edit either field)</span></label>
+        <div class="rate-couple">
+          <div class="rate-couple__col">
+            <span class="rate-couple__label muted">Total bandwidth</span>
+            <input class="lcm-input mono" data-bind="override.totalRate"
+                   data-on:input="$override.rate = window.lcmRate.divide($override.totalRate, $connLimit)"
+                   placeholder="100m or 0">
+          </div>
+          <span class="rate-couple__op mono" data-text="'/ ' + $connLimit + ' ='"></span>
+          <div class="rate-couple__col">
+            <span class="rate-couple__label muted">Per connection</span>
+            <input class="lcm-input mono" data-bind="override.rate"
+                   data-on:input="$override.totalRate = window.lcmRate.multiply($override.rate, $connLimit)"
+                   placeholder="10m or 0">
+          </div>
+        </div>
+        <p class="rate-couple__warn muted" data-show="!$connLimitParsed">
+          Could not find <code>limit_conn perip N;</code> in your config — assuming the lancache default of <strong>10</strong>.
+        </p>
+      </div>
+      <div class="override-modal__field">
+        <label class="lcm-checkbox">
+          <input type="checkbox" data-bind="override.exempt"> Exempt from connection-count limit
+        </label>
+      </div>
+      <div class="override-modal__actions">
+        <button class="btn-primary"
+                data-on:click="@post('/api/ratelimit/override'); $override.open=false">
+          Save
+        </button>
+        <button class="btn-ghost btn-danger"
+                data-on:click="@post('/api/ratelimit/override/clear'); $override.open=false">
+          Clear override
+        </button>
+        <button class="btn-ghost"
+                data-on:click="$override.open=false">
+          Cancel
+        </button>
+      </div>
+    </div>
+  </div>
+
   <div class="two-col-tables">
     <div class="glass-card" id="active-ips-card">
       <div class="card-head"><h3>Active downloads</h3><span class="muted">last 5 min</span></div>
       <table class="lcm-table">
-        <thead><tr><th>IP</th><th>Top CDN</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th><th>Last seen</th></tr></thead>
+        <thead><tr><th>IP</th><th>Top CDN</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th><th>Last seen</th><th>Limit</th></tr></thead>
         <tbody id="active-ips-body">
-          <tr><td colspan="6" class="empty-state">Loading…</td></tr>
+          <tr><td colspan="7" class="empty-state">Loading…</td></tr>
         </tbody>
       </table>
     </div>
