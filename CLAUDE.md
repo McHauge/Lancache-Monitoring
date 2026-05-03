@@ -145,7 +145,7 @@ Available glass-morphism classes:
 - All frontend reactivity uses `data-*` attributes; no separate JS framework.
 - State is in **signals** prefixed with `$`. Initialize with `data-signals='{...}'`, bind with `data-bind`, display with `data-text`.
 - Backend emits SSE events: `datastar-patch-elements` (HTML), `datastar-patch-signals` (JSON), or `ExecuteScript()` (JS).
-- The dashboard uses one long-lived `data-on-load="@get('/api/dashboard')"` SSE that the server keeps writing to every 2 s.
+- The dashboard uses one long-lived `data-init="@get('/api/dashboard')"` SSE that the server keeps writing to every 2 s. (Note: Datastar v1 uses `data-init` for "fire on mount", not `data-on-load` — the latter is silently a no-op.)
 - Toasts are dispatched via `ExecuteScript()` firing a `basecoat:toast` `CustomEvent` — see [handlers.go](handlers.go) `toastJS()`.
 
 See [llmdocs/datastar.md](llmdocs/datastar.md) for the complete attribute and SDK reference, and [llmdocs/basecoatcss.md](llmdocs/basecoatcss.md) for the component catalog.
