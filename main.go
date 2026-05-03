@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strconv"
 	"strings"
@@ -157,8 +158,43 @@ type App struct {
 	Auth     *Auth
 }
 
+// versionString returns the VCS revision baked in by `go build` (Go 1.18+
+// embeds this automatically), with a "+dirty" suffix if the working tree had
+// uncommitted changes at build time. Returns "unknown" outside a VCS context.
+func versionString() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	var rev, suffix string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+		case "vcs.modified":
+			if s.Value == "true" {
+				suffix = "+dirty"
+			}
+		case "vcs.time":
+			// included for context if we want it later
+		}
+	}
+	if rev == "" {
+		if info.Main.Version != "" && info.Main.Version != "(devel)" {
+			return info.Main.Version
+		}
+		return "unknown"
+	}
+	return rev + suffix
+}
+
 func main() {
 	loadEnv(".env")
+
+	log.Infof("lancache-monitor %s (go %s)", versionString(), runtime.Version())
 
 	addr := envOr("LCM_ADDR", ":8080")
 	themeName := envOr("LCM_THEME", "teal")
@@ -214,6 +250,7 @@ func main() {
 
 	go live.Run(ctx)
 	go agg.Run(ctx)
+	go RunTailerStatsLogger(ctx)
 	go func() {
 		if err := TailLog(ctx, logPath, func(line LogLine) {
 			live.Track(line)

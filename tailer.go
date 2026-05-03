@@ -9,11 +9,27 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	log "github.com/s00500/env_logger"
 )
+
+// parseStats tracks per-minute parse counters plus a small set of unparseable
+// line samples for debugging. Samples are logged the first few times they
+// occur and never repeated, so a misconfigured log_format produces three
+// example lines and then quiets down to a single "skipped N" line per minute.
+var parseStats = struct {
+	parsed   atomic.Int64
+	skipped  atomic.Int64
+	muSample sync.Mutex
+	samples  int // number of sample lines already logged
+}{}
+
+const maxParseSamples = 3
 
 // LogLine is one parsed lancache access log entry.
 type LogLine struct {
@@ -83,6 +99,48 @@ func ParseLogLine(s string) (LogLine, bool) {
 	}, true
 }
 
+// logParseSample logs the first few unparseable lines verbatim so a
+// misconfigured log_format is obvious in the container logs. Subsequent
+// failures are silent until the next periodic stats tick.
+func logParseSample(line string) {
+	parseStats.muSample.Lock()
+	defer parseStats.muSample.Unlock()
+	if parseStats.samples >= maxParseSamples {
+		return
+	}
+	parseStats.samples++
+	if len(line) > 300 {
+		line = line[:300] + "…"
+	}
+	log.Warnf("tailer: failed to parse line (sample %d/%d): %s",
+		parseStats.samples, maxParseSamples, line)
+}
+
+// RunTailerStatsLogger emits a summary of how many lines the tailer parsed
+// vs skipped during the previous minute. Skipped lines indicate either a
+// malformed entry or — much more commonly — a log_format mismatch.
+func RunTailerStatsLogger(ctx context.Context) {
+	t := time.NewTicker(60 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			parsed := parseStats.parsed.Swap(0)
+			skipped := parseStats.skipped.Swap(0)
+			if parsed == 0 && skipped == 0 {
+				continue
+			}
+			if skipped > 0 {
+				log.Warnf("tailer: parsed=%d skipped=%d (last 60s) — skipped > 0 means log_format mismatch", parsed, skipped)
+			} else {
+				log.Infof("tailer: parsed=%d skipped=0 (last 60s)", parsed)
+			}
+		}
+	}
+}
+
 // TailLog follows path, parses each new line, and calls emit for each parsed
 // LogLine. It handles log rotation by reopening the file when fsnotify reports
 // the original was renamed or removed. It returns when ctx is canceled or on
@@ -127,9 +185,11 @@ func tailOne(ctx context.Context, path string, emit func(LogLine)) error {
 	}
 	defer f.Close()
 
-	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+	offset, err := f.Seek(0, io.SeekEnd)
+	if err != nil {
 		return err
 	}
+	log.Infof("tailer: opened %s (size=%d bytes, tailing from end)", path, offset)
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -180,7 +240,11 @@ func tailOne(ctx context.Context, path string, emit func(LogLine)) error {
 		line, err := reader.ReadString('\n')
 		if len(line) > 0 {
 			if parsed, ok := ParseLogLine(line); ok {
+				parseStats.parsed.Add(1)
 				emit(parsed)
+			} else if trimmed := strings.TrimRight(line, "\r\n"); trimmed != "" {
+				parseStats.skipped.Add(1)
+				logParseSample(trimmed)
 			}
 		}
 		if err != nil {
