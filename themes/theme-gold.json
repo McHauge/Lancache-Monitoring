@@ -1,0 +1,20 @@
+{
+  "name": "gold",
+  "label": "Warm Gold",
+  "colors": {
+    "accent": "#f59e0b",
+    "accent-darker": "#d97706",
+    "accent-rgb": "245,158,11",
+
+    "bg-gradient-from": "#0f0d08",
+    "bg-gradient-to": "#0a1118",
+    "bg-sticky-header": "rgba(15,13,8,0.9)",
+
+    "orb-1": "#f59e0b",
+    "orb-1-opacity": "0.12",
+    "orb-2": "#b45309",
+    "orb-2-opacity": "0.10",
+    "orb-3": "#d97706",
+    "orb-3-opacity": "0.08"
+  }
+}

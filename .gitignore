@@ -27,6 +27,17 @@ go.work.sum
 # env file
 .env
 
+# Runtime state — created by lancache-monitor at startup.
+# DB holds per-minute aggregates; the .secret file is the HMAC session key.
+monitor.db
+monitor.db-shm
+monitor.db-wal
+monitor.db.secret
+*.db
+*.db-shm
+*.db-wal
+*.db.secret
+
 # Editor/IDE
 # .idea/
 # .vscode/

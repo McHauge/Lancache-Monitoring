@@ -1,0 +1,45 @@
+# Example compose snippet for running lancache-monitor alongside lancache-monolithic.
+#
+# Merge this `lancache-monitor` service into your existing lancache compose file,
+# OR run it as a standalone compose file in the same directory as the lancache
+# stack. The two important integration points are:
+#
+#   1. /opt/lancache/logs is mounted RO into the monitor so it can tail access.log.
+#   2. /opt/lancache/custom/rate-limit.conf is mounted RW (note: lancache mounts it
+#      :ro; the monitor needs RW to write changes from the UI).
+#   3. /var/run/docker.sock is mounted so the monitor can run
+#      `nginx -t && nginx -s reload` inside the lancache container.
+
+services:
+  lancache-monitor:
+    build: .
+    container_name: lancache-monitor
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    environment:
+      LCM_PASSWORD: lancache            # required — sets dashboard login
+      LCM_LANCACHE_CONTAINER: lancache  # name of your existing lancache container
+      LCM_LOG_PATH: /lancache-logs/access.log
+      LCM_RATELIMIT_PATH: /lancache-conf/rate-limit.conf
+      LCM_DB_PATH: /data/monitor.db
+      LCM_RETENTION_DAYS: "30"
+      LCM_THEME: teal                   # mono | teal | gold
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /opt/lancache/logs:/lancache-logs:ro
+      - /opt/lancache/custom/rate-limit.conf:/lancache-conf/rate-limit.conf:rw
+      - lancache-monitor-data:/data
+    # Adjust nonroot to match the host UID that owns rate-limit.conf if needed.
+    # The distroless image runs as UID 65532. If your file is owned by root,
+    # either chown it (recommended) or override with `user: "0:0"`.
+
+volumes:
+  lancache-monitor-data:
+
+# --- Reminder for the existing lancache-monolithic service ----------------
+# Your current rate-limit mount probably looks like:
+#   - /opt/lancache/custom/rate-limit.conf:/etc/nginx/conf.d/rate-limit.conf:ro
+# Drop the `:ro` so the monitor can write to it (lancache only reads):
+#   - /opt/lancache/custom/rate-limit.conf:/etc/nginx/conf.d/rate-limit.conf
+# --------------------------------------------------------------------------

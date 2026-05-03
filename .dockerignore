@@ -1,0 +1,14 @@
+.git
+.github
+*.exe
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+.env
+.idea
+.vscode
+llmdocs
+tasks
+node_modules

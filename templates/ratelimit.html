@@ -1,0 +1,49 @@
+{{define "body"}}
+{{with .Body}}
+<div data-signals='{"rateLimitContent": {{.Content | printf "%q"}}, "reloadOutput": "", "reloadOK": null, "saving": false}'>
+
+  <div class="glass-card editor-card">
+    <div class="card-head">
+      <h3>Rate-limit config</h3>
+      <span class="muted mono">{{.Path}}</span>
+    </div>
+
+    <div class="editor-help">
+      <p>This file is mounted into the lancache container at
+        <code>/etc/nginx/conf.d/rate-limit.conf</code>. Saving here writes to the
+        host file and asks lancache to run <code>nginx -t &amp;&amp; nginx -s reload</code>.
+        If <code>nginx -t</code> rejects the new config, the previous file is restored
+        automatically.</p>
+    </div>
+
+    <textarea class="ratelimit-editor mono"
+              data-bind:rate-limit-content
+              spellcheck="false"
+              rows="22"></textarea>
+
+    <div class="editor-actions">
+      <button class="btn-primary"
+              data-attr:disabled="$saving"
+              data-on:click="$saving = true; @post('/api/ratelimit/save'); $saving = false">
+        <span data-show="!$saving">Apply &amp; reload</span>
+        <span data-show="$saving">Reloading…</span>
+      </button>
+      <button class="btn-ghost"
+              data-on:click="@get('/api/ratelimit/load')">
+        Reload from disk
+      </button>
+    </div>
+  </div>
+
+  <div class="glass-card output-card" data-show="$reloadOutput !== ''">
+    <div class="card-head">
+      <h3>nginx output</h3>
+      <span data-show="$reloadOK === true" class="ok-pill">OK</span>
+      <span data-show="$reloadOK === false" class="err-pill">Failed</span>
+    </div>
+    <pre class="reload-output mono" data-text="$reloadOutput"></pre>
+  </div>
+
+</div>
+{{end}}
+{{end}}

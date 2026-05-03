@@ -1,0 +1,125 @@
+{{define "body"}}
+<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "chartJSON": "[]", "updated": ""}'
+     data-on-load="@get('/api/dashboard')">
+
+  <div class="stats-grid">
+    <div class="glass-card stat">
+      <div class="stat-label">24h cache hit</div>
+      <div class="stat-value" data-text="$day.bytesHitH"></div>
+      <div class="stat-sub"><span data-text="$day.hitPct"></span>% byte hit rate</div>
+    </div>
+    <div class="glass-card stat">
+      <div class="stat-label">24h cache miss</div>
+      <div class="stat-value" data-text="$day.bytesMissH"></div>
+      <div class="stat-sub">delivered from upstream</div>
+    </div>
+    <div class="glass-card stat">
+      <div class="stat-label">24h requests</div>
+      <div class="stat-value" data-text="$day.requests"></div>
+      <div class="stat-sub">across all CDNs</div>
+    </div>
+    <div class="glass-card stat">
+      <div class="stat-label">Active clients (5 min)</div>
+      <div class="stat-value" data-text="$activeCount"></div>
+      <div class="stat-sub">downloading right now</div>
+    </div>
+  </div>
+
+  <div class="glass-card chart-card">
+    <div class="card-head">
+      <h3>Throughput — last 60 minutes</h3>
+      <span class="muted" data-text="$updated"></span>
+    </div>
+    <div class="chart-wrap">
+      <canvas id="throughputChart"></canvas>
+    </div>
+  </div>
+
+  <div class="two-col-tables">
+    <div class="glass-card" id="active-ips-card">
+      <div class="card-head"><h3>Active downloads</h3><span class="muted">last 5 min</span></div>
+      <table class="lcm-table">
+        <thead><tr><th>IP</th><th>Top CDN</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th><th>Last seen</th></tr></thead>
+        <tbody id="active-ips-body">
+          <tr><td colspan="6" class="empty-state">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="glass-card" id="top-hosts-card">
+      <div class="card-head"><h3>Top CDNs</h3><span class="muted">last 5 min</span></div>
+      <table class="lcm-table">
+        <thead><tr><th>Host</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th></tr></thead>
+        <tbody id="top-hosts-body">
+          <tr><td colspan="4" class="empty-state">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Chart.js handle: created once on first render, then .update()'d in place.
+  let throughputChart = null;
+
+  window.lcmRender = function () {
+    let pts = [];
+    try {
+      // Read $chartJSON off the signals root. Datastar exposes ctx.signals
+      // on the element bound to data-signals; we just parse a stringified
+      // array since arrays-as-signals don't round-trip cleanly in v1.
+      const root = document.querySelector('[data-signals]');
+      const raw = root && root.dataset && root.dataset.lcmChart;
+      pts = raw ? JSON.parse(raw) : [];
+    } catch (e) { pts = []; }
+
+    const labels = pts.map(p => new Date(p.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
+    const mbps = pts.map(p => p.mbps);
+    const hit = pts.map(p => p.hitGB);
+    const miss = pts.map(p => p.missGB);
+
+    const canvas = document.getElementById('throughputChart');
+    if (!canvas || !window.Chart) return;
+
+    if (!throughputChart) {
+      throughputChart = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets: [
+          { label: 'Throughput (Mbps)', data: mbps, borderColor: 'rgba(96,165,250,1)',
+            backgroundColor: 'rgba(96,165,250,0.15)', fill: true, tension: 0.25, yAxisID: 'y' },
+          { label: 'Hit (GB/min)', data: hit, borderColor: 'rgba(74,222,128,1)',
+            backgroundColor: 'rgba(74,222,128,0.10)', fill: false, tension: 0.25, yAxisID: 'y2' },
+          { label: 'Miss (GB/min)', data: miss, borderColor: 'rgba(248,113,113,1)',
+            backgroundColor: 'rgba(248,113,113,0.10)', fill: false, tension: 0.25, yAxisID: 'y2' },
+        ] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { labels: { color: 'rgba(255,255,255,0.7)' } } },
+          scales: {
+            x: { ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            y: { position: 'left', ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { color: 'rgba(255,255,255,0.05)' }, title: { display: true, text: 'Mbps', color: 'rgba(255,255,255,0.6)' } },
+            y2: { position: 'right', ticks: { color: 'rgba(255,255,255,0.5)' }, grid: { display: false }, title: { display: true, text: 'GB/min', color: 'rgba(255,255,255,0.6)' } }
+          }
+        }
+      });
+    } else {
+      throughputChart.data.labels = labels;
+      throughputChart.data.datasets[0].data = mbps;
+      throughputChart.data.datasets[1].data = hit;
+      throughputChart.data.datasets[2].data = miss;
+      throughputChart.update('none');
+    }
+  };
+
+  // The server stuffs the latest chart series into data-lcm-chart on the root
+  // element via ExecuteScript every push, then calls lcmRender().
+  window.lcmSetChart = function (json) {
+    const root = document.querySelector('[data-signals]');
+    if (root) root.dataset.lcmChart = json;
+    window.lcmRender();
+  };
+</script>
+{{end}}

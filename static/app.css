@@ -1,0 +1,343 @@
+/* ============================================
+   Lancache Monitor — glass morphism + theme tokens
+   Adapted from the Bet25-Bud-Game design system.
+   ============================================ */
+
+* { font-family: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif; box-sizing: border-box; }
+
+body {
+  background: linear-gradient(135deg, var(--theme-bg-gradient-from) 0%, var(--theme-bg-gradient-to) 100%);
+  color: #fff;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.muted { color: rgba(255,255,255,0.5); font-size: 0.8rem; }
+.num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+
+/* Ambient gradient orbs */
+.orb-container { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+.orb { position: absolute; border-radius: 50%; filter: blur(150px); }
+.orb-1 { width: 500px; height: 500px; background: var(--theme-orb-1); top: 10%; left: 10%; opacity: var(--theme-orb-1-opacity); }
+.orb-2 { width: 600px; height: 600px; background: var(--theme-orb-2); top: 50%; right: 5%; opacity: var(--theme-orb-2-opacity); }
+.orb-3 { width: 400px; height: 400px; background: var(--theme-orb-3); bottom: 10%; left: 20%; opacity: var(--theme-orb-3-opacity); }
+
+/* Glass surfaces */
+.glass {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.glass-card {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Page shell */
+.page-wrap {
+  position: relative; z-index: 10;
+  max-width: 100rem; margin-inline: auto; padding: 1.75rem 2rem;
+}
+
+/* ---- Navigation bar ---- */
+.navbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 1.5rem;
+  border-radius: 0.75rem;
+}
+.nav-brand {
+  font-size: 1.4rem; font-weight: 700; letter-spacing: -0.5px; color: #fff;
+}
+.nav-brand small {
+  display: block; font-size: 0.8rem; font-weight: 400;
+  color: rgba(255,255,255,0.5); letter-spacing: 0; margin-top: 0.125rem;
+}
+.nav-tabs { display: flex; gap: 0.25rem; align-items: center; }
+.nav-tab {
+  font-size: 0.9rem; font-weight: 500;
+  color: rgba(255,255,255,0.6);
+  cursor: pointer; transition: all 0.3s;
+  padding: 0.5rem 1rem; border-radius: 0.5rem;
+  position: relative; border: none;
+  background: transparent; font-family: inherit;
+  text-decoration: none;
+}
+.nav-tab:hover {
+  color: #fff;
+  background: rgba(var(--theme-accent-rgb), 0.1);
+}
+.nav-tab.active {
+  color: #fff;
+  background: rgba(var(--theme-accent-rgb), 0.15);
+}
+.nav-tab.active::after {
+  content: ''; position: absolute;
+  bottom: 0; left: 0.75rem; right: 0.75rem;
+  height: 2px; background: var(--theme-accent);
+  border-radius: 2px;
+}
+
+/* ---- Card heads ---- */
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.card-head h3 {
+  font-size: 1rem; font-weight: 600; letter-spacing: -0.2px;
+  color: #fff; margin: 0;
+}
+
+/* ---- Stat cards ---- */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+.stat { padding: 1.25rem 1.5rem; margin-bottom: 0; }
+.stat-label {
+  font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 0.5rem;
+}
+.stat-value {
+  font-size: 1.75rem; font-weight: 700; line-height: 1.1;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.stat-sub {
+  margin-top: 0.4rem;
+  font-size: 0.8rem; color: rgba(255,255,255,0.5);
+}
+
+@media (max-width: 1100px) {
+  .stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ---- Chart card ---- */
+.chart-card { padding: 1.25rem 1.5rem; }
+.chart-wrap {
+  position: relative; height: 320px; width: 100%;
+}
+
+/* ---- Two-column tables (active IPs + top hosts) ---- */
+.two-col-tables {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 1rem;
+}
+@media (max-width: 1100px) {
+  .two-col-tables { grid-template-columns: 1fr; }
+}
+
+/* ---- Tables ---- */
+.lcm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.lcm-table thead th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.45);
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.lcm-table thead th.num { text-align: right; }
+.lcm-table tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.85);
+}
+.lcm-table tbody tr:hover td {
+  background: rgba(255,255,255,0.03);
+}
+.empty-state {
+  padding: 1.5rem;
+  text-align: center;
+  color: rgba(255,255,255,0.4);
+  font-size: 0.85rem;
+}
+
+/* ---- Rate-limit editor ---- */
+.editor-card { padding: 1.25rem 1.5rem; }
+.editor-help {
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+.editor-help code {
+  background: rgba(255,255,255,0.07);
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+}
+.ratelimit-editor {
+  width: 100%;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  color: #e4e4e7;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 16rem;
+}
+.ratelimit-editor:focus {
+  outline: none;
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 2px rgba(var(--theme-accent-rgb), 0.15);
+}
+.editor-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  align-items: center;
+}
+
+/* Buttons */
+.btn-primary {
+  padding: 0.55rem 1.4rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: none;
+  font-family: inherit;
+  background: linear-gradient(135deg, var(--theme-accent) 0%, var(--theme-accent-darker) 100%);
+  color: #fff;
+}
+.btn-primary:hover:not([disabled]) {
+  box-shadow: 0 0 18px rgba(var(--theme-accent-rgb), 0.4);
+  transform: translateY(-1px);
+}
+.btn-primary[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.btn-ghost {
+  padding: 0.55rem 1.1rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.85);
+  transition: all 0.2s;
+}
+.btn-ghost:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+}
+
+/* nginx output panel */
+.output-card { padding: 1.25rem 1.5rem; }
+.reload-output {
+  background: rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 0.5rem;
+  padding: 0.85rem 1rem;
+  color: #d4d4d8;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+  max-height: 22rem;
+  overflow: auto;
+}
+.ok-pill, .err-pill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+.ok-pill {
+  background: rgba(74,222,128,0.15);
+  color: #4ade80;
+  border: 1px solid rgba(74,222,128,0.35);
+}
+.err-pill {
+  background: rgba(248,113,113,0.15);
+  color: #f87171;
+  border: 1px solid rgba(248,113,113,0.35);
+}
+
+/* ---- Login page ---- */
+.login-body { min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-wrap {
+  position: relative; z-index: 10;
+  width: 100%;
+  max-width: 22rem;
+  padding: 1rem;
+}
+.login-card { padding: 2rem; }
+.login-card h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.login-form { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1.25rem; }
+.login-form label {
+  font-size: 0.8rem; font-weight: 500;
+  color: rgba(255,255,255,0.6);
+}
+.login-form .input,
+.login-form input[type="password"] {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  color: #fff;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.login-form .input:focus,
+.login-form input[type="password"]:focus {
+  outline: none;
+  border-color: var(--theme-accent);
+  box-shadow: 0 0 0 2px rgba(var(--theme-accent-rgb), 0.15);
+}
+.login-form .btn-primary { margin-top: 0.5rem; }
+.login-err {
+  background: rgba(248,113,113,0.12);
+  border: 1px solid rgba(248,113,113,0.35);
+  color: #fca5a5;
+  border-radius: 0.5rem;
+  padding: 0.55rem 0.8rem;
+  font-size: 0.85rem;
+}
+
+/* ---- Toaster (basecoat dispatches a CustomEvent that this region picks up) ---- */
+.toaster {
+  position: fixed;
+  bottom: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 50;
+  pointer-events: none;
+}
+.toaster .toast { pointer-events: auto; }

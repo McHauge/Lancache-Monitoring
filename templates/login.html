@@ -1,0 +1,33 @@
+{{define "login"}}<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/static/vendor/fonts/fonts.css">
+    <link rel="stylesheet" href="/static/vendor/basecoat.min.css">
+    <style>{{.ThemeCSS}}</style>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login-body">
+  <div class="orb-container">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="login-wrap">
+    <div class="glass-card login-card">
+      <h1>Lancache Monitor</h1>
+      <p class="muted">Enter the admin password to continue.</p>
+
+      <form method="post" action="/login" class="login-form">
+        {{with .Body}}{{if .Error}}<div class="login-err">{{.Error}}</div>{{end}}{{end}}
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autofocus required class="input">
+        <button type="submit" class="btn-primary">Sign in</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>{{end}}

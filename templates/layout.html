@@ -1,0 +1,42 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/static/vendor/fonts/fonts.css">
+    <link rel="stylesheet" href="/static/vendor/basecoat.min.css">
+    <style>{{.ThemeCSS}}</style>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/vendor/basecoat.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" defer></script>
+    <script type="module" src="/static/vendor/datastar.js"></script>
+</head>
+<body>
+  <div class="orb-container">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="page-wrap">
+    <nav class="navbar glass">
+      <div class="nav-brand">
+        Lancache Monitor
+        <small>Live cache traffic &amp; rate-limit admin</small>
+      </div>
+      <div class="nav-tabs">
+        <a href="/" class="nav-tab{{if eq .Page "dashboard"}} active{{end}}">Dashboard</a>
+        <a href="/ratelimit" class="nav-tab{{if eq .Page "ratelimit"}} active{{end}}">Rate Limits</a>
+        <form method="post" action="/logout" style="display:inline">
+          <button type="submit" class="nav-tab" style="background:transparent;border:none;cursor:pointer">Logout</button>
+        </form>
+      </div>
+    </nav>
+
+    {{template "body" .}}
+
+    <section id="toaster" class="toaster"></section>
+  </div>
+</body>
+</html>{{end}}
