@@ -1,5 +1,5 @@
 {{define "body"}}
-<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "chartJSON": "[]", "updated": ""}'
+<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "updated": ""}'
      data-init="@get('/api/dashboard')">
 
   <div class="stats-grid">
@@ -63,16 +63,8 @@
   // Chart.js handle: created once on first render, then .update()'d in place.
   let throughputChart = null;
 
-  window.lcmRender = function () {
-    let pts = [];
-    try {
-      // Read $chartJSON off the signals root. Datastar exposes ctx.signals
-      // on the element bound to data-signals; we just parse a stringified
-      // array since arrays-as-signals don't round-trip cleanly in v1.
-      const root = document.querySelector('[data-signals]');
-      const raw = root && root.dataset && root.dataset.lcmChart;
-      pts = raw ? JSON.parse(raw) : [];
-    } catch (e) { pts = []; }
+  window.lcmRender = function (pts) {
+    pts = Array.isArray(pts) ? pts : [];
 
     const labels = pts.map(p => new Date(p.ts * 1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}));
     const mbps = pts.map(p => p.mbps);
@@ -114,12 +106,10 @@
     }
   };
 
-  // The server stuffs the latest chart series into data-lcm-chart on the root
-  // element via ExecuteScript every push, then calls lcmRender().
-  window.lcmSetChart = function (json) {
-    const root = document.querySelector('[data-signals]');
-    if (root) root.dataset.lcmChart = json;
-    window.lcmRender();
+  // The server calls this every push via ExecuteScript with the chart series
+  // as a real JS array literal — pass it straight through to lcmRender.
+  window.lcmSetChart = function (pts) {
+    window.lcmRender(pts);
   };
 </script>
 {{end}}
