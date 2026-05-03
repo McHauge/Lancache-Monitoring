@@ -163,7 +163,7 @@ func main() {
 	addr := envOr("LCM_ADDR", ":8080")
 	themeName := envOr("LCM_THEME", "teal")
 	logPath := envOr("LCM_LOG_PATH", "/data/logs/access.log")
-	dbPath := envOr("LCM_DB_PATH", "monitor.db")
+	dbPath := envOr("LCM_DB_PATH", "/data/monitor.db")
 	rateLimitPath := envOr("LCM_RATELIMIT_PATH", "/etc/nginx/conf.d/rate-limit.conf")
 	lancacheContainer := envOr("LCM_LANCACHE_CONTAINER", "lancache")
 	dockerHost := envOr("LCM_DOCKER_HOST", defaultDockerHost())

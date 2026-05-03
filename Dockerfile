@@ -9,9 +9,11 @@ RUN go mod download
 COPY . .
 ENV CGO_ENABLED=0 GOOS=linux
 RUN go build -trimpath -ldflags="-s -w" -o /out/lancache-monitor .
+RUN mkdir /data-seed
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/lancache-monitor /lancache-monitor
+COPY --from=build --chown=65532:65532 /data-seed /data
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/lancache-monitor"]

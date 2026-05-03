@@ -43,3 +43,13 @@ volumes:
 # Drop the `:ro` so the monitor can write to it (lancache only reads):
 #   - /opt/lancache/custom/rate-limit.conf:/etc/nginx/conf.d/rate-limit.conf
 # --------------------------------------------------------------------------
+
+# --- Upgrading from an older image ----------------------------------------
+# The /data volume is seeded by the image with UID 65532 ownership, so a
+# fresh deploy works out of the box. If you ran an earlier image that crashed
+# with `unable to open database file: out of memory (14)`, the named volume
+# was created root-owned and won't be re-seeded. Discard it once:
+#   docker compose down
+#   docker volume rm <project>_lancache-monitor-data
+#   docker compose up -d --build
+# --------------------------------------------------------------------------
