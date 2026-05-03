@@ -41,3 +41,7 @@ monitor.db.secret
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Yarn Stuff
+node_modules/
+*.lock
