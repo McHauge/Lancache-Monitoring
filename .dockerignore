@@ -1,4 +1,7 @@
-.git
+# NOTE: .git is intentionally NOT ignored — go build (>=1.18) reads
+# .git/HEAD to embed the VCS revision into the binary so we can log
+# `lancache-monitor <sha>` at startup. The directory is consumed by the
+# build stage and is not present in the final distroless image.
 .github
 *.exe
 *.test

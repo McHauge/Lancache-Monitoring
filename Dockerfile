@@ -3,6 +3,10 @@
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 
+# git is required so `go build` can embed VCS info (vcs.revision / vcs.modified)
+# into the binary; we surface that via debug.ReadBuildInfo() at startup.
+RUN apk add --no-cache git
+
 COPY go.mod go.sum ./
 RUN go mod download
 
