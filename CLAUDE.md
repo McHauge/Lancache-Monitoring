@@ -72,12 +72,20 @@ The reload path ([reloader.go](reloader.go)) uses the Docker SDK to `ContainerEx
 ## Lancache Access Log Format
 
 ```
-[$time_local] $remote_addr $request_method "$request_uri" $http_range $status $body_bytes_sent $upstream_cache_status $host $upstream_status $upstream_response_time "$http_user_agent"
+[$cacheidentifier] $remote_addr / $host $upstream_cache_status $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$upstream_cache_status" "$host" "$http_range"
 ```
+
+This is the stock **lancache-monolithic** `cachelog` format. Example HIT:
+
+```
+[steam] 10.0.0.5 / - - - [02/May/2026:14:23:01 +0200] "GET /depot/123/chunk/abc HTTP/1.1" 200 1048576 "-" "Valve/Steam" "HIT" "lancache.steamcontent.com" "-"
+```
+
+The parser keys off the **second (quoted)** `$upstream_cache_status` field — the unquoted one early in the line is `-` for most real requests in stock lancache configs.
 
 `$upstream_cache_status` is one of `HIT | MISS | BYPASS | EXPIRED | STALE | UPDATING | REVALIDATED | -`. `HIT` and `REVALIDATED` count as cache hits; everything else counts as a miss.
 
-The parser is in [tailer.go](tailer.go); see `TestParseLogLine_*` for the contract.
+The parser is in [tailer.go](tailer.go); `TestParseLogLine_RealHitExample` and `TestParseLogLine_RealMissExample` use verbatim lines from a production lancache install.
 
 ## File Structure
 

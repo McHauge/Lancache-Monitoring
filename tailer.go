@@ -33,13 +33,17 @@ func (l LogLine) IsHit() bool {
 	return l.CacheStatus == "HIT" || l.CacheStatus == "REVALIDATED"
 }
 
-// Lancache log format (single line):
-// [time_local] remote_addr method "request_uri" http_range status body_bytes_sent upstream_cache_status host upstream_status upstream_response_time "user_agent"
+// Stock lancache-monolithic log format (single line):
+// [service] remote_addr / host upstream_cache_status remote_user [time_local] "request" status body_bytes_sent "referer" "user_agent" "upstream_cache_status" "host" "http_range"
 //
 // Example:
-// [02/May/2026:14:23:01 +0200] 10.0.0.5 GET "/depot/123/chunk/abc" - 200 1048576 HIT lancache.steamcontent.com 200 0.123 "Valve/Steam"
+// [steam] 10.0.0.5 / - - - [02/May/2026:14:23:01 +0200] "GET /depot/123/chunk/abc HTTP/1.1" 200 1048576 "-" "Valve/Steam" "HIT" "lancache.steamcontent.com" "-"
+//
+// We capture: remote_addr, time_local, method, uri, status, bytes_sent,
+// cache_status (the quoted one near the end — it carries HIT/MISS reliably),
+// and the upstream host (the quoted host field after cache_status).
 var logLineRE = regexp.MustCompile(
-	`^\[([^\]]+)\] (\S+) (\S+) "([^"]*)" \S+ (\d+) (\d+) (\S+) (\S+) `,
+	`^\[\S+\] (\S+) \S+ \S+ \S+ \S+ \[([^\]]+)\] "(\S+) (\S+)[^"]*" (\d+) (\d+) "[^"]*" "[^"]*" "([^"]*)" "([^"]*)" "[^"]*"`,
 )
 
 // timeLocalLayout matches nginx $time_local: 02/Jan/2006:15:04:05 -0700
@@ -52,7 +56,7 @@ func ParseLogLine(s string) (LogLine, bool) {
 	if m == nil {
 		return LogLine{}, false
 	}
-	t, err := time.Parse(timeLocalLayout, m[1])
+	t, err := time.Parse(timeLocalLayout, m[2])
 	if err != nil {
 		return LogLine{}, false
 	}
@@ -60,7 +64,7 @@ func ParseLogLine(s string) (LogLine, bool) {
 	bytes, _ := strconv.ParseInt(m[6], 10, 64)
 
 	// Strip an optional ::ffff: prefix from IPv4-mapped IPv6 addresses.
-	addr := m[2]
+	addr := m[1]
 	if ip := net.ParseIP(addr); ip != nil {
 		if v4 := ip.To4(); v4 != nil {
 			addr = v4.String()
