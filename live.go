@@ -94,6 +94,16 @@ func (lt *LiveTracker) Run(ctx context.Context) {
 	}
 }
 
+// Reset drops every tracked IP and host. Used after a "clear data" action so
+// the dashboard tables snap to empty immediately without waiting for the
+// rolling-window sweep.
+func (lt *LiveTracker) Reset() {
+	lt.mu.Lock()
+	defer lt.mu.Unlock()
+	lt.byIP = make(map[string]*activitySample)
+	lt.byHost = make(map[string]*activitySample)
+}
+
 func (lt *LiveTracker) sweep(now time.Time) {
 	cutoff := now.Add(-lt.window)
 	lt.mu.Lock()

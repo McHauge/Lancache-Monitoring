@@ -228,12 +228,18 @@ type MinuteRow struct {
 // LastMinutes returns minute rows from now-n minutes through now.
 func (a *Aggregator) LastMinutes(n int) ([]MinuteRow, error) {
 	from := time.Now().Unix()/60 - int64(n)
+	return a.LastMinutesFrom(from)
+}
+
+// LastMinutesFrom returns per-minute rows with ts >= fromMinute. Pass 0 for
+// "everything currently in the table" (subject to retention).
+func (a *Aggregator) LastMinutesFrom(fromMinute int64) ([]MinuteRow, error) {
 	rows, err := a.db.Query(`
 		SELECT ts, bytes_hit, bytes_miss, requests_hit, requests_miss
 		FROM minute_stats
 		WHERE ts >= ?
 		ORDER BY ts ASC
-	`, from)
+	`, fromMinute)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +253,62 @@ func (a *Aggregator) LastMinutes(n int) ([]MinuteRow, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// HourlyFrom returns one row per hour bucket with ts >= fromMinute, summing
+// the per-minute counters. The returned MinuteRow.TS is the first minute of
+// each hour bucket (a unix-minute), so the existing chart label code (which
+// multiplies TS by 60) keeps working unchanged.
+func (a *Aggregator) HourlyFrom(fromMinute int64) ([]MinuteRow, error) {
+	rows, err := a.db.Query(`
+		SELECT (ts/60)*60 AS h,
+		       COALESCE(SUM(bytes_hit), 0),
+		       COALESCE(SUM(bytes_miss), 0),
+		       COALESCE(SUM(requests_hit), 0),
+		       COALESCE(SUM(requests_miss), 0)
+		FROM minute_stats
+		WHERE ts >= ?
+		GROUP BY h
+		ORDER BY h ASC
+	`, fromMinute)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MinuteRow
+	for rows.Next() {
+		var r MinuteRow
+		if err := rows.Scan(&r.TS, &r.BytesHit, &r.BytesMiss, &r.RequestsHit, &r.RequestsMiss); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ClearAll wipes every row from minute_stats and minute_host_stats and resets
+// the in-flight bucket so the current minute starts fresh on the next ingest.
+func (a *Aggregator) ClearAll() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	tx, err := a.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM minute_host_stats`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM minute_stats`); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	a.bucket = newBucket()
+	a.currentMinute = 0
+	return nil
 }
 
 // Totals is the cumulative summary over a time range.

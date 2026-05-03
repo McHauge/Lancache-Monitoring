@@ -420,26 +420,81 @@ func (app *App) HandleRateLimitMigrate(w http.ResponseWriter, r *http.Request) {
 	app.pushOverridesTable(sse)
 }
 
+// rangeMinutes maps each selector key to its window in minutes. A value of
+// 0 means "all time" (no lower bound on ts). Keep the keys in sync with the
+// <option> values in templates/dashboard.html.
+var rangeMinutes = map[string]int{
+	"5m":  5,
+	"10m": 10,
+	"30m": 30,
+	"1h":  60,
+	"10h": 600,
+	"1d":  1440,
+	"1w":  10080,
+	"all": 0,
+}
+
+// rangeLabel is the human-friendly text shown in card headings.
+var rangeLabel = map[string]string{
+	"5m":  "Last 5 min",
+	"10m": "Last 10 min",
+	"30m": "Last 30 min",
+	"1h":  "Last hour",
+	"10h": "Last 10 h",
+	"1d":  "Last 24 h",
+	"1w":  "Last 7 days",
+	"all": "All time",
+}
+
+// resolveRange picks the window key, defaulting to def if the request key is
+// unknown. Returns the canonical key, its minute count, and the label.
+func resolveRange(key, def string) (string, int, string) {
+	if _, ok := rangeMinutes[key]; !ok {
+		key = def
+	}
+	return key, rangeMinutes[key], rangeLabel[key]
+}
+
 // HandleDashboardStream is a long-lived SSE that pushes dashboard updates
 // every two seconds. It returns when the client disconnects. Scalar values
 // are sent as Datastar signals; tabular data is rendered server-side and
 // pushed as HTML morphs (Datastar v1 has no client-side `for` directive).
+//
+// Two query params control the windows:
+//   - range:     drives the chart + the four stat cards (default "1d")
+//   - hostRange: drives the Top CDNs table (default "5m" → live tracker)
 func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 	sse := datastar.NewSSE(w, r)
 	ctx := r.Context()
 
+	rangeKey, rangeMins, rLabel := resolveRange(r.URL.Query().Get("range"), "1d")
+	hostKey, hostMins, hLabel := resolveRange(r.URL.Query().Get("hostRange"), "5m")
+
 	push := func() error {
 		ips := app.Live.SnapshotIPs()
-		hosts := app.Live.SnapshotHosts()
 		overrides, connLimit, connLimitParsed := readOverridesAndConnLimit(app.RateLim)
 
-		minutes, err := app.Agg.LastMinutes(60)
+		nowMin := time.Now().Unix() / 60
+		var fromMinute int64
+		if rangeMins > 0 {
+			fromMinute = nowMin - int64(rangeMins)
+		}
+
+		// Per-minute up to 1d; hourly buckets beyond that and for "all time".
+		var (
+			minutes []MinuteRow
+			err     error
+		)
+		if rangeMins > 0 && rangeMins <= 1440 {
+			minutes, err = app.Agg.LastMinutesFrom(fromMinute)
+		} else {
+			minutes, err = app.Agg.HourlyFrom(fromMinute)
+		}
 		if err != nil {
 			log.Warnf("dashboard query: %v", err)
 		}
 
-		dayFrom := time.Now().Add(-24 * time.Hour).Unix() / 60
-		day, _ := app.Agg.SinceMinute(dayFrom)
+		totals, _ := app.Agg.SinceMinute(fromMinute)
 
 		// Build chart payload as JSON for the client.
 		type chartPoint struct {
@@ -448,29 +503,41 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 			HitGB  float64 `json:"hitGB"`
 			MissGB float64 `json:"missGB"`
 		}
+		// Bucket length in seconds — 60 s for per-minute rows, 3600 s for
+		// hourly rows. Used to convert bytes to Mbps and to per-minute GB so
+		// the y-axis labeled "GB/min" stays honest across both granularities.
+		bucketSecs := 60.0
+		if rangeMins == 0 || rangeMins > 1440 {
+			bucketSecs = 3600.0
+		}
+		bucketMinutes := bucketSecs / 60.0
 		chart := make([]chartPoint, 0, len(minutes))
 		for _, m := range minutes {
 			totalBytes := float64(m.BytesHit + m.BytesMiss)
 			chart = append(chart, chartPoint{
 				TS:     m.TS * 60,
-				Mbps:   (totalBytes * 8) / 60 / 1e6,
-				HitGB:  float64(m.BytesHit) / 1e9,
-				MissGB: float64(m.BytesMiss) / 1e9,
+				Mbps:   (totalBytes * 8) / bucketSecs / 1e6,
+				HitGB:  float64(m.BytesHit) / 1e9 / bucketMinutes,
+				MissGB: float64(m.BytesMiss) / 1e9 / bucketMinutes,
 			})
 		}
 		chartJSON, _ := json.Marshal(chart)
 
 		signals := map[string]any{
 			"day": map[string]any{
-				"bytesHitH":  humanBytes(day.BytesHit),
-				"bytesMissH": humanBytes(day.BytesMiss),
-				"hitPct":     int(day.ByteHitRatio() * 100),
-				"requests":   day.RequestsTotal(),
+				"bytesHitH":  humanBytes(totals.BytesHit),
+				"bytesMissH": humanBytes(totals.BytesMiss),
+				"hitPct":     int(totals.ByteHitRatio() * 100),
+				"requests":   totals.RequestsTotal(),
 			},
 			"activeCount":     len(ips),
 			"updated":         time.Now().Format("15:04:05"),
 			"connLimit":       connLimit,
 			"connLimitParsed": connLimitParsed,
+			"rangeKey":        rangeKey,
+			"rangeLabel":      rLabel,
+			"hostRangeKey":    hostKey,
+			"hostRangeLabel":  hLabel,
 		}
 		if err := sse.MarshalAndPatchSignals(signals); err != nil {
 			return err
@@ -480,8 +547,24 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 		if err := sse.PatchElements(renderIPRows(ips, overrides)); err != nil {
 			return err
 		}
-		// Render and patch the host table body.
-		if err := sse.PatchElements(renderHostRows(hosts)); err != nil {
+		// Render and patch the host table body. Default 5m comes from the
+		// live tracker (carries last-seen); wider ranges come from the
+		// aggregator (no last-seen column data).
+		var hostHTML string
+		if hostKey == "5m" {
+			hostHTML = renderHostRows(app.Live.SnapshotHosts())
+		} else {
+			hostFrom := nowMin - int64(hostMins)
+			if hostMins == 0 {
+				hostFrom = 0
+			}
+			tops, qerr := app.Agg.TopHostsSince(hostFrom, maxHostRows)
+			if qerr != nil {
+				log.Warnf("top-hosts query: %v", qerr)
+			}
+			hostHTML = renderHostRowsFromAgg(tops)
+		}
+		if err := sse.PatchElements(hostHTML); err != nil {
 			return err
 		}
 
@@ -608,6 +691,49 @@ func renderHostRows(hosts []HostSnapshot) string {
 	}
 	b.WriteString(`</tbody>`)
 	return b.String()
+}
+
+// renderHostRowsFromAgg renders the same <tbody> as renderHostRows but from
+// aggregator-sourced rows (no per-request count or hit ratio — those aren't
+// stored per host). Reqs and Hit% cells are emitted as a muted dash.
+func renderHostRowsFromAgg(hosts []HostTotal) string {
+	var b strings.Builder
+	b.WriteString(`<tbody id="top-hosts-body">`)
+	if len(hosts) == 0 {
+		b.WriteString(`<tr><td colspan="4" class="empty-state">No CDN traffic in this range.</td></tr>`)
+	} else {
+		for i, h := range hosts {
+			if i >= maxHostRows {
+				break
+			}
+			hitPct := 0
+			if total := h.Total(); total > 0 {
+				hitPct = int(float64(h.BytesHit) / float64(total) * 100)
+			}
+			fmt.Fprintf(&b,
+				`<tr><td class="mono">%s</td><td class="num">%s</td><td class="num"><span class="muted">—</span></td><td class="num">%d%%</td></tr>`,
+				htmlEscape(h.Host), humanBytes(h.Total()), hitPct)
+		}
+	}
+	b.WriteString(`</tbody>`)
+	return b.String()
+}
+
+// HandleClearData wipes all aggregated history and resets the live tracker.
+// The trigger lives behind a confirm modal in templates/dashboard.html.
+func (app *App) HandleClearData(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sse := datastar.NewSSE(w, r)
+	if err := app.Agg.ClearAll(); err != nil {
+		log.Errorf("clear data: %v", err)
+		_ = sse.ExecuteScript(toastJS("error", "Clear failed", err.Error()))
+		return
+	}
+	app.Live.Reset()
+	_ = sse.ExecuteScript(toastJS("success", "Cleared", "All history deleted."))
 }
 
 // htmlEscape is a tight subset of html.EscapeString — log values are

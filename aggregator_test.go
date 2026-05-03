@@ -49,6 +49,81 @@ func TestAggregator_IngestAndQuery(t *testing.T) {
 	}
 }
 
+func TestAggregator_HourlyFrom(t *testing.T) {
+	a := newTestAgg(t)
+
+	// Two ingests in hour 12, two in hour 13. The aggregator only flushes a
+	// minute bucket when the next ingest crosses a minute boundary, so we
+	// trail with one extra ingest in hour 14 to flush hour 13's last bucket.
+	t0 := time.Date(2026, 5, 3, 12, 0, 30, 0, time.UTC)
+	t1 := time.Date(2026, 5, 3, 12, 30, 0, 0, time.UTC)
+	t2 := time.Date(2026, 5, 3, 13, 5, 0, 0, time.UTC)
+	t3 := time.Date(2026, 5, 3, 13, 45, 0, 0, time.UTC)
+	tFlush := time.Date(2026, 5, 3, 14, 0, 0, 0, time.UTC)
+
+	a.Ingest(LogLine{Time: t0, BytesSent: 100, CacheStatus: "HIT", Host: "steam"})
+	a.Ingest(LogLine{Time: t1, BytesSent: 200, CacheStatus: "MISS", Host: "steam"})
+	a.Ingest(LogLine{Time: t2, BytesSent: 50, CacheStatus: "HIT", Host: "steam"})
+	a.Ingest(LogLine{Time: t3, BytesSent: 25, CacheStatus: "MISS", Host: "steam"})
+	a.Ingest(LogLine{Time: tFlush, BytesSent: 0, CacheStatus: "MISS", Host: "steam"})
+
+	rows, err := a.HourlyFrom(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two flushed buckets: hour 12 and hour 13. Hour 14's ingest is in-flight
+	// (only flushed when a later ingest or Close runs).
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 hourly buckets, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].BytesHit != 100 || rows[0].BytesMiss != 200 {
+		t.Errorf("hour 12: got hit=%d miss=%d, want 100/200", rows[0].BytesHit, rows[0].BytesMiss)
+	}
+	if rows[1].BytesHit != 50 || rows[1].BytesMiss != 25 {
+		t.Errorf("hour 13: got hit=%d miss=%d, want 50/25", rows[1].BytesHit, rows[1].BytesMiss)
+	}
+	// rows[1].TS is in unix-minutes and should mark the start of the hour
+	// (i.e. minute index = hours-since-epoch * 60).
+	wantTS13 := time.Date(2026, 5, 3, 13, 0, 0, 0, time.UTC).Unix() / 60
+	if rows[1].TS != wantTS13 {
+		t.Errorf("hour 13 TS: got %d want %d", rows[1].TS, wantTS13)
+	}
+}
+
+func TestAggregator_ClearAll(t *testing.T) {
+	a := newTestAgg(t)
+
+	t0 := time.Date(2026, 5, 3, 12, 0, 30, 0, time.UTC)
+	a.Ingest(LogLine{Time: t0, BytesSent: 100, CacheStatus: "HIT", Host: "steam"})
+	// Force flush.
+	a.Ingest(LogLine{Time: t0.Add(2 * time.Minute), BytesSent: 1, CacheStatus: "MISS", Host: "epic"})
+
+	if err := a.ClearAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	totals, err := a.SinceMinute(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if totals.BytesTotal() != 0 || totals.RequestsTotal() != 0 {
+		t.Errorf("expected zero totals after clear, got %+v", totals)
+	}
+
+	hosts, err := a.TopHostsSince(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 0 {
+		t.Errorf("expected no hosts after clear, got %+v", hosts)
+	}
+
+	// In-flight bucket must be reset so the next ingest starts a fresh minute.
+	if a.currentMinute != 0 {
+		t.Errorf("currentMinute not reset: got %d", a.currentMinute)
+	}
+}
+
 func TestAggregator_TopHosts(t *testing.T) {
 	a := newTestAgg(t)
 	t0 := time.Date(2026, 5, 3, 12, 0, 30, 0, time.UTC)

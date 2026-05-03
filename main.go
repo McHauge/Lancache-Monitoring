@@ -280,6 +280,7 @@ func main() {
 	mux.Handle("/api/ratelimit/global", auth.Require(http.HandlerFunc(app.HandleRateLimitGlobalSet)))
 	mux.Handle("/api/ratelimit/override", auth.Require(http.HandlerFunc(app.HandleRateLimitOverrideSet)))
 	mux.Handle("/api/ratelimit/override/clear", auth.Require(http.HandlerFunc(app.HandleRateLimitOverrideClear)))
+	mux.Handle("/api/admin/clear-data", auth.Require(http.HandlerFunc(app.HandleClearData)))
 
 	srv := &http.Server{
 		Addr:         addr,
