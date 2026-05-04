@@ -1,20 +1,19 @@
 {{define "body"}}
 <script>
   // Pulled out of localStorage before Datastar mounts so the initial
-  // /api/dashboard request already uses the user's persisted ranges.
+  // /api/dashboard request already uses the user's persisted range.
   (function () {
     try {
       window.__lcmInitRange = localStorage.getItem('lcmRange') || '1d';
-      window.__lcmInitHostRange = localStorage.getItem('lcmHostRange') || '5m';
     } catch (e) {
       window.__lcmInitRange = '1d';
-      window.__lcmInitHostRange = '5m';
     }
   })();
 </script>
 
-<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "updated": "", "connLimit": 10, "connLimitParsed": false, "rangeKey": "1d", "rangeLabel": "Last 24 h", "hostRangeKey": "5m", "hostRangeLabel": "last 5 min", "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}, "clear": {"open": false}}'
-     data-init="$rangeKey = window.__lcmInitRange || '1d'; $hostRangeKey = window.__lcmInitHostRange || '5m'; @get('/api/dashboard?range=' + $rangeKey + '&hostRange=' + $hostRangeKey)">
+<div data-signals='{"day": {"bytesHitH": "—", "bytesMissH": "—", "hitPct": 0, "requests": 0}, "activeCount": 0, "updated": "", "connLimit": 10, "connLimitParsed": false, "rangeKey": "1d", "rangeLabel": "Last 24 h", "override": {"ip": "", "rate": "", "totalRate": "", "exempt": false, "open": false}, "clear": {"open": false}}'
+     data-init="$rangeKey = window.__lcmInitRange || '1d'"
+     data-effect="@get('/api/dashboard?range=' + $rangeKey)">
 
   <div class="stats-grid">
     <div class="glass-card stat">
@@ -33,18 +32,21 @@
       <div class="stat-sub">across all CDNs</div>
     </div>
     <div class="glass-card stat">
-      <div class="stat-label">Active clients (5 min)</div>
+      <div class="stat-label"><span data-text="$rangeLabel"></span> active clients</div>
       <div class="stat-value" data-text="$activeCount"></div>
-      <div class="stat-sub">downloading right now</div>
+      <div class="stat-sub">unique IPs with traffic</div>
     </div>
   </div>
 
   <div class="glass-card chart-card">
-    <div class="card-head">
+    <div class="card-head" style="position: relative;">
       <h3>Throughput — <span data-text="$rangeLabel"></span></h3>
+      <span class="muted mono"
+            style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none;"
+            data-text="$updated"></span>
       <span style="display:inline-flex; align-items:center; gap:0.75rem;">
-        <select class="lcm-input mono" data-bind="$rangeKey"
-                data-on:change="try { localStorage.setItem('lcmRange', $rangeKey); } catch(e) {} ; @get('/api/dashboard?range=' + $rangeKey + '&hostRange=' + $hostRangeKey)">
+        <select class="lcm-input mono" data-bind="rangeKey"
+                data-on:change="try { localStorage.setItem('lcmRange', $rangeKey); } catch(e) {}">
           <option value="5m">Last 5 min</option>
           <option value="10m">Last 10 min</option>
           <option value="30m">Last 30 min</option>
@@ -56,7 +58,6 @@
         </select>
         <button class="btn-ghost btn-danger btn-sm"
                 data-on:click="$clear.open=true">Clear all data</button>
-        <span class="muted" data-text="$updated"></span>
       </span>
     </div>
     <div class="chart-wrap">
@@ -113,8 +114,12 @@
     </div>
   </div>
 
-  <!-- Clear-data confirm modal — armed by the "Clear all data" button. -->
-  <div class="override-modal" data-show="$clear.open">
+  <!-- Clear-data confirm modal — armed by the "Clear all data" button.
+       Inline backdrop-filter mirrors the .override-modal rule belt-and-
+       suspenders so the blur shows up reliably regardless of stacking
+       context quirks when two .override-modal siblings live on one page. -->
+  <div class="override-modal" data-show="$clear.open"
+       style="backdrop-filter: blur(8px) saturate(140%); -webkit-backdrop-filter: blur(8px) saturate(140%);">
     <div class="override-modal__inner glass-card">
       <div class="card-head">
         <h3>Clear all history?</h3>
@@ -141,7 +146,10 @@
 
   <div class="two-col-tables">
     <div class="glass-card" id="active-ips-card">
-      <div class="card-head"><h3>Active downloads</h3><span class="muted">last 5 min</span></div>
+      <div class="card-head">
+        <h3>Active downloads</h3>
+        <span class="muted" data-text="$rangeLabel"></span>
+      </div>
       <table class="lcm-table">
         <thead><tr><th>IP</th><th>Top CDN</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th><th>Last seen</th><th>Limit</th></tr></thead>
         <tbody id="active-ips-body">
@@ -153,20 +161,7 @@
     <div class="glass-card" id="top-hosts-card">
       <div class="card-head">
         <h3>Top CDNs</h3>
-        <span style="display:inline-flex; align-items:center; gap:0.5rem;">
-          <span class="muted" data-text="$hostRangeLabel"></span>
-          <select class="lcm-input mono" data-bind="$hostRangeKey"
-                  data-on:change="try { localStorage.setItem('lcmHostRange', $hostRangeKey); } catch(e) {} ; @get('/api/dashboard?range=' + $rangeKey + '&hostRange=' + $hostRangeKey)">
-            <option value="5m">Last 5 min</option>
-            <option value="10m">Last 10 min</option>
-            <option value="30m">Last 30 min</option>
-            <option value="1h">Last hour</option>
-            <option value="10h">Last 10 h</option>
-            <option value="1d">Last 24 h</option>
-            <option value="1w">Last 7 days</option>
-            <option value="all">All time</option>
-          </select>
-        </span>
+        <span class="muted" data-text="$rangeLabel"></span>
       </div>
       <table class="lcm-table">
         <thead><tr><th>Host</th><th class="num">Bytes</th><th class="num">Reqs</th><th class="num">Hit %</th></tr></thead>

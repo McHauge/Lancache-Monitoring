@@ -460,18 +460,19 @@ func resolveRange(key, def string) (string, int, string) {
 // are sent as Datastar signals; tabular data is rendered server-side and
 // pushed as HTML morphs (Datastar v1 has no client-side `for` directive).
 //
-// Two query params control the windows:
-//   - range:     drives the chart + the four stat cards (default "1d")
-//   - hostRange: drives the Top CDNs table (default "5m" → live tracker)
+// One query param drives the entire dashboard:
+//   - range: chart, stat cards, top CDNs, and active downloads (default "1d")
+//
+// For the "5m" key the live tracker is used for the IP/host tables (so
+// "Top CDN" and "Last seen" reflect right-now activity); wider ranges are
+// served from the aggregator tables.
 func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 	sse := datastar.NewSSE(w, r)
 	ctx := r.Context()
 
 	rangeKey, rangeMins, rLabel := resolveRange(r.URL.Query().Get("range"), "1d")
-	hostKey, hostMins, hLabel := resolveRange(r.URL.Query().Get("hostRange"), "5m")
 
 	push := func() error {
-		ips := app.Live.SnapshotIPs()
 		overrides, connLimit, connLimitParsed := readOverridesAndConnLimit(app.RateLim)
 
 		nowMin := time.Now().Unix() / 60
@@ -523,6 +524,30 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 		}
 		chartJSON, _ := json.Marshal(chart)
 
+		// Active-clients headline + IP/host tables.
+		var (
+			ipHTML, hostHTML string
+			activeCount      int
+		)
+		if rangeKey == "5m" {
+			liveIPs := app.Live.SnapshotIPs()
+			ipHTML = renderIPRows(liveIPs, overrides)
+			hostHTML = renderHostRows(app.Live.SnapshotHosts())
+			activeCount = len(liveIPs)
+		} else {
+			topIPs, qerr := app.Agg.TopIPsSince(fromMinute, maxIPRows)
+			if qerr != nil {
+				log.Warnf("top-ips query: %v", qerr)
+			}
+			ipHTML = renderIPRowsFromAgg(topIPs, overrides, rLabel)
+			topHosts, qerr := app.Agg.TopHostsSince(fromMinute, maxHostRows)
+			if qerr != nil {
+				log.Warnf("top-hosts query: %v", qerr)
+			}
+			hostHTML = renderHostRowsFromAgg(topHosts)
+			activeCount = len(topIPs)
+		}
+
 		signals := map[string]any{
 			"day": map[string]any{
 				"bytesHitH":  humanBytes(totals.BytesHit),
@@ -530,39 +555,19 @@ func (app *App) HandleDashboardStream(w http.ResponseWriter, r *http.Request) {
 				"hitPct":     int(totals.ByteHitRatio() * 100),
 				"requests":   totals.RequestsTotal(),
 			},
-			"activeCount":     len(ips),
+			"activeCount":     activeCount,
 			"updated":         time.Now().Format("15:04:05"),
 			"connLimit":       connLimit,
 			"connLimitParsed": connLimitParsed,
 			"rangeKey":        rangeKey,
 			"rangeLabel":      rLabel,
-			"hostRangeKey":    hostKey,
-			"hostRangeLabel":  hLabel,
 		}
 		if err := sse.MarshalAndPatchSignals(signals); err != nil {
 			return err
 		}
 
-		// Render and patch the IP table body.
-		if err := sse.PatchElements(renderIPRows(ips, overrides)); err != nil {
+		if err := sse.PatchElements(ipHTML); err != nil {
 			return err
-		}
-		// Render and patch the host table body. Default 5m comes from the
-		// live tracker (carries last-seen); wider ranges come from the
-		// aggregator (no last-seen column data).
-		var hostHTML string
-		if hostKey == "5m" {
-			hostHTML = renderHostRows(app.Live.SnapshotHosts())
-		} else {
-			hostFrom := nowMin - int64(hostMins)
-			if hostMins == 0 {
-				hostFrom = 0
-			}
-			tops, qerr := app.Agg.TopHostsSince(hostFrom, maxHostRows)
-			if qerr != nil {
-				log.Warnf("top-hosts query: %v", qerr)
-			}
-			hostHTML = renderHostRowsFromAgg(tops)
 		}
 		if err := sse.PatchElements(hostHTML); err != nil {
 			return err
@@ -687,6 +692,37 @@ func renderHostRows(hosts []HostSnapshot) string {
 			fmt.Fprintf(&b,
 				`<tr><td class="mono">%s</td><td class="num">%s</td><td class="num">%d</td><td class="num">%d%%</td></tr>`,
 				htmlEscape(s.Host), humanBytes(s.Bytes), s.Requests, int(s.HitRatio*100))
+		}
+	}
+	b.WriteString(`</tbody>`)
+	return b.String()
+}
+
+// renderIPRowsFromAgg renders the active-IPs <tbody> from aggregator data.
+// Used when the dashboard range is wider than the 5-min live tracker can
+// cover. Top CDN is "—" because per-IP-per-host history isn't stored; Last
+// seen is derived from the most-recent minute the IP has data in.
+func renderIPRowsFromAgg(ips []IPTotal, overrides map[string]Override, rangeLabel string) string {
+	var b strings.Builder
+	b.WriteString(`<tbody id="active-ips-body">`)
+	if len(ips) == 0 {
+		fmt.Fprintf(&b, `<tr><td colspan="7" class="empty-state">No client traffic in %s.</td></tr>`,
+			htmlEscape(strings.ToLower(rangeLabel)))
+	} else {
+		for i, s := range ips {
+			if i >= maxIPRows {
+				break
+			}
+			ov, has := overrides[s.IP]
+			limitCell := overrideCell(s.IP, ov, has)
+			lastSeen := `<span class="muted">—</span>`
+			if s.LastTS > 0 {
+				lastSeen = htmlEscape(humanAgo(time.Since(time.Unix(s.LastTS*60, 0))))
+			}
+			fmt.Fprintf(&b,
+				`<tr><td class="mono">%s</td><td class="mono"><span class="muted">—</span></td><td class="num">%s</td><td class="num">%d</td><td class="num">%d%%</td><td class="muted">%s</td><td>%s</td></tr>`,
+				htmlEscape(s.IP), humanBytes(s.Total()),
+				s.RequestsTotal(), int(s.HitRatio()*100), lastSeen, limitCell)
 		}
 	}
 	b.WriteString(`</tbody>`)

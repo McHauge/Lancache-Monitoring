@@ -94,9 +94,9 @@ func TestAggregator_ClearAll(t *testing.T) {
 	a := newTestAgg(t)
 
 	t0 := time.Date(2026, 5, 3, 12, 0, 30, 0, time.UTC)
-	a.Ingest(LogLine{Time: t0, BytesSent: 100, CacheStatus: "HIT", Host: "steam"})
+	a.Ingest(LogLine{Time: t0, BytesSent: 100, CacheStatus: "HIT", Host: "steam", RemoteAddr: "10.0.0.5"})
 	// Force flush.
-	a.Ingest(LogLine{Time: t0.Add(2 * time.Minute), BytesSent: 1, CacheStatus: "MISS", Host: "epic"})
+	a.Ingest(LogLine{Time: t0.Add(2 * time.Minute), BytesSent: 1, CacheStatus: "MISS", Host: "epic", RemoteAddr: "10.0.0.6"})
 
 	if err := a.ClearAll(); err != nil {
 		t.Fatal(err)
@@ -118,9 +118,46 @@ func TestAggregator_ClearAll(t *testing.T) {
 		t.Errorf("expected no hosts after clear, got %+v", hosts)
 	}
 
+	ips, err := a.TopIPsSince(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) != 0 {
+		t.Errorf("expected no IPs after clear, got %+v", ips)
+	}
+
 	// In-flight bucket must be reset so the next ingest starts a fresh minute.
 	if a.currentMinute != 0 {
 		t.Errorf("currentMinute not reset: got %d", a.currentMinute)
+	}
+}
+
+func TestAggregator_TopIPs(t *testing.T) {
+	a := newTestAgg(t)
+	t0 := time.Date(2026, 5, 3, 12, 0, 30, 0, time.UTC)
+
+	for i := 0; i < 4; i++ {
+		a.Ingest(LogLine{Time: t0, BytesSent: 1000, CacheStatus: "HIT", Host: "steam", RemoteAddr: "10.0.0.5"})
+	}
+	a.Ingest(LogLine{Time: t0, BytesSent: 200, CacheStatus: "MISS", Host: "blizzard", RemoteAddr: "10.0.0.6"})
+	// Flush by ingesting a line in a later minute.
+	a.Ingest(LogLine{Time: t0.Add(2 * time.Minute), BytesSent: 1, CacheStatus: "MISS", Host: "epic", RemoteAddr: "10.0.0.7"})
+
+	ips, err := a.TopIPsSince(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) < 2 || ips[0].IP != "10.0.0.5" {
+		t.Fatalf("expected 10.0.0.5 first, got %+v", ips)
+	}
+	if ips[0].Total() != 4000 {
+		t.Errorf("10.0.0.5 total: got %d want 4000", ips[0].Total())
+	}
+	if ips[0].RequestsTotal() != 4 {
+		t.Errorf("10.0.0.5 requests: got %d want 4", ips[0].RequestsTotal())
+	}
+	if ips[0].LastTS == 0 {
+		t.Error("10.0.0.5 LastTS should be set")
 	}
 }
 

@@ -20,11 +20,19 @@ type minuteBucket struct {
 	RequestsHit  int64
 	RequestsMiss int64
 	Hosts        map[string]*hostBucket
+	IPs          map[string]*ipBucket
 }
 
 type hostBucket struct {
 	BytesHit  int64
 	BytesMiss int64
+}
+
+type ipBucket struct {
+	BytesHit     int64
+	BytesMiss    int64
+	RequestsHit  int64
+	RequestsMiss int64
 }
 
 // Aggregator owns the SQLite handle and the in-memory minute bucket.
@@ -60,7 +68,10 @@ func NewAggregator(path string, retentionDays int) (*Aggregator, error) {
 }
 
 func newBucket() *minuteBucket {
-	return &minuteBucket{Hosts: make(map[string]*hostBucket)}
+	return &minuteBucket{
+		Hosts: make(map[string]*hostBucket),
+		IPs:   make(map[string]*ipBucket),
+	}
 }
 
 func initSchema(db *sql.DB) error {
@@ -80,6 +91,16 @@ func initSchema(db *sql.DB) error {
 			PRIMARY KEY (ts, host)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_minute_host_ts ON minute_host_stats(ts)`,
+		`CREATE TABLE IF NOT EXISTS minute_ip_stats (
+			ts            INTEGER NOT NULL,
+			ip            TEXT NOT NULL,
+			bytes_hit     INTEGER NOT NULL DEFAULT 0,
+			bytes_miss    INTEGER NOT NULL DEFAULT 0,
+			requests_hit  INTEGER NOT NULL DEFAULT 0,
+			requests_miss INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (ts, ip)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_minute_ip_ts ON minute_ip_stats(ts)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -136,6 +157,21 @@ func (a *Aggregator) Ingest(line LogLine) {
 		hb.BytesHit += line.BytesSent
 	} else {
 		hb.BytesMiss += line.BytesSent
+	}
+
+	if line.RemoteAddr != "" {
+		ib := a.bucket.IPs[line.RemoteAddr]
+		if ib == nil {
+			ib = &ipBucket{}
+			a.bucket.IPs[line.RemoteAddr] = ib
+		}
+		if line.IsHit() {
+			ib.BytesHit += line.BytesSent
+			ib.RequestsHit++
+		} else {
+			ib.BytesMiss += line.BytesSent
+			ib.RequestsMiss++
+		}
 	}
 }
 
@@ -202,6 +238,20 @@ func (a *Aggregator) flushLocked(minute int64, b *minuteBucket) error {
 			return err
 		}
 	}
+	for ip, ib := range b.IPs {
+		_, err = tx.Exec(`
+			INSERT INTO minute_ip_stats (ts, ip, bytes_hit, bytes_miss, requests_hit, requests_miss)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(ts, ip) DO UPDATE SET
+				bytes_hit = bytes_hit + excluded.bytes_hit,
+				bytes_miss = bytes_miss + excluded.bytes_miss,
+				requests_hit = requests_hit + excluded.requests_hit,
+				requests_miss = requests_miss + excluded.requests_miss
+		`, minute, ip, ib.BytesHit, ib.BytesMiss, ib.RequestsHit, ib.RequestsMiss)
+		if err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
@@ -211,6 +261,9 @@ func (a *Aggregator) applyRetention() error {
 		return err
 	}
 	if _, err := a.db.Exec(`DELETE FROM minute_host_stats WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := a.db.Exec(`DELETE FROM minute_ip_stats WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
 	return nil
@@ -286,8 +339,9 @@ func (a *Aggregator) HourlyFrom(fromMinute int64) ([]MinuteRow, error) {
 	return out, rows.Err()
 }
 
-// ClearAll wipes every row from minute_stats and minute_host_stats and resets
-// the in-flight bucket so the current minute starts fresh on the next ingest.
+// ClearAll wipes every row from minute_stats, minute_host_stats, and
+// minute_ip_stats and resets the in-flight bucket so the current minute
+// starts fresh on the next ingest.
 func (a *Aggregator) ClearAll() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -300,6 +354,9 @@ func (a *Aggregator) ClearAll() error {
 	if _, err := tx.Exec(`DELETE FROM minute_host_stats`); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM minute_ip_stats`); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(`DELETE FROM minute_stats`); err != nil {
 		return err
 	}
@@ -309,6 +366,56 @@ func (a *Aggregator) ClearAll() error {
 	a.bucket = newBucket()
 	a.currentMinute = 0
 	return nil
+}
+
+// IPTotal is one row of per-IP traffic for a time range.
+type IPTotal struct {
+	IP           string
+	BytesHit     int64
+	BytesMiss    int64
+	RequestsHit  int64
+	RequestsMiss int64
+	LastTS       int64 // newest minute (unix-minutes) where this IP had activity
+}
+
+func (i IPTotal) Total() int64         { return i.BytesHit + i.BytesMiss }
+func (i IPTotal) RequestsTotal() int64 { return i.RequestsHit + i.RequestsMiss }
+func (i IPTotal) HitRatio() float64 {
+	tot := i.RequestsTotal()
+	if tot == 0 {
+		return 0
+	}
+	return float64(i.RequestsHit) / float64(tot)
+}
+
+// TopIPsSince returns the top N IPs by total bytes since fromMinute.
+func (a *Aggregator) TopIPsSince(fromMinute int64, n int) ([]IPTotal, error) {
+	rows, err := a.db.Query(`
+		SELECT ip,
+		       COALESCE(SUM(bytes_hit), 0),
+		       COALESCE(SUM(bytes_miss), 0),
+		       COALESCE(SUM(requests_hit), 0),
+		       COALESCE(SUM(requests_miss), 0),
+		       COALESCE(MAX(ts), 0)
+		FROM minute_ip_stats
+		WHERE ts >= ?
+		GROUP BY ip
+		ORDER BY SUM(bytes_hit + bytes_miss) DESC
+		LIMIT ?
+	`, fromMinute, n)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []IPTotal
+	for rows.Next() {
+		var i IPTotal
+		if err := rows.Scan(&i.IP, &i.BytesHit, &i.BytesMiss, &i.RequestsHit, &i.RequestsMiss, &i.LastTS); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
 }
 
 // Totals is the cumulative summary over a time range.
