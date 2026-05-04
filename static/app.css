@@ -380,6 +380,13 @@ body {
   border-color: var(--theme-accent);
   box-shadow: 0 0 0 2px rgba(var(--theme-accent-rgb), 0.15);
 }
+/* Native <option> menus are drawn by the OS — they don't inherit the
+   parent's translucent background. Force a solid dark so the dropdown
+   panel matches the rest of the theme. */
+.lcm-input option {
+  background-color: #0f172a;
+  color: #fff;
+}
 .lcm-checkbox {
   font-size: 0.85rem;
   display: inline-flex;
