@@ -5,16 +5,16 @@ Watches the access log, shows live hit/miss + per-IP throughput, and lets you
 edit and reload `rate-limit.conf` from a browser.
 
 ```
-┌──────────────────────────┐         ┌────────────────────────────┐
-│ lancache (existing)      │         │ lancache-monitor (this)    │
-│  nginx                   │         │  - tails access.log        │
+┌──────────────────────────┐          ┌────────────────────────────┐
+│ lancache (existing)      │          │ lancache-monitor (this)    │
+│  nginx                   │          │  - tails access.log        │
 │  /data/logs/access.log   │◀──RO───▶│  - SQLite per-minute stats │
-│  /etc/nginx/conf.d/      │         │  - Datastar SSE dashboard  │
+│  /etc/nginx/conf.d/      │          │  - Datastar SSE dashboard  │
 │    rate-limit.conf       │◀──RW───▶│  - reads/writes config     │
-└──────────────────────────┘         │  - exec nginx -s reload    │
-        ▲                            └────────────┬───────────────┘
-        └─── docker exec nginx -s reload ─────────┘
-             (via /var/run/docker.sock)
+└──────────────────────────┘          │  - exec nginx -s reload    │
+        ▲                             └────────────┬───────────────┘
+        └──── docker exec nginx -s reload ─────────┘
+              (via /var/run/docker.sock)
 ```
 
 ## Screenshots
@@ -80,12 +80,21 @@ exe is fully self-contained — templates, CSS, themes are all embedded.
 
 ## Quick start — Docker
 
+A prebuilt image is published at
+[`mchauge/lancache-monitoring`](https://hub.docker.com/r/mchauge/lancache-monitoring)
+on Docker Hub, so you don't need a Go toolchain to run this — just pull the
+image. (Building locally still works; see step 4.)
+
 1. Copy and edit the example compose file:
    ```bash
    cp docker-compose.example.yml docker-compose.yml
    $EDITOR docker-compose.yml   # change LCM_PASSWORD, paths if not /opt/lancache
    ```
-2. **Drop `:ro` on your existing lancache rate-limit mount** so the monitor can
+2. To use the published image, replace `build: .` in the compose file with:
+   ```yaml
+   image: mchauge/lancache-monitoring:latest
+   ```
+3. **Drop `:ro` on your existing lancache rate-limit mount** so the monitor can
    write to it:
    ```yaml
    # before
@@ -93,14 +102,22 @@ exe is fully self-contained — templates, CSS, themes are all embedded.
    # after
    - /opt/lancache/custom/rate-limit.conf:/etc/nginx/conf.d/rate-limit.conf
    ```
-3. Make sure the host file is readable+writable by the container UID. The
+4. Make sure the host file is readable+writable by the container UID. The
    distroless image runs as UID 65532; either chown the file or override with
    `user: "0:0"` on the service.
-4. Bring it up:
+5. Bring it up:
    ```bash
+   docker compose up -d        # uses mchauge/lancache-monitoring:latest
+   # or, if you kept `build: .`:
    docker compose up -d --build
    ```
-5. Open `http://<host>:8088`, log in, and watch traffic flow.
+6. Open `http://<host>:8088`, log in, and watch traffic flow.
+
+To upgrade later, pull the newest tag:
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 ## Configuration
 
