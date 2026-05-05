@@ -17,13 +17,30 @@ edit and reload `rate-limit.conf` from a browser.
              (via /var/run/docker.sock)
 ```
 
+## Screenshots
+
+![Live dashboard — throughput, hit/miss, active clients, top CDNs](docs/screenshots/dashboard.png)
+
+![Rate-limit editor — per-IP overrides + raw nginx config](docs/screenshots/rate-limits.png)
+
 ## What you get
 
-- **Live dashboard** — last-60-min throughput chart, 24h totals, hit/miss ratio,
-  per-CDN breakdown, and a table of every client IP currently downloading.
-- **Rate-limit editor** — read and write `rate-limit.conf` from a textarea.
-  Saving runs `nginx -t && nginx -s reload` inside the lancache container; if
-  `nginx -t` fails, the previous file is restored automatically.
+- **Live dashboard** — throughput chart, hit/miss ratio, per-CDN breakdown, and
+  a table of every client IP currently downloading. Range is selectable from
+  **last 5 min** through **all time** (5m / 10m / 30m / 1h / 12h / 24h / 7d / all)
+  and persisted per-browser. The stat cards retotal to match the selected range,
+  including the **active clients** count. A "Clear all data" button wipes the
+  SQLite history when you want a clean slate.
+- **Per-IP rate-limit overrides** — give a specific IP or CIDR its own
+  `limit_rate`, mark it **exempt** from the per-IP connection limit, or both.
+  The UI takes either total bandwidth or per-connection value (divides by
+  `limit_conn perip`) so you can specify whichever side is more natural.
+  First-time setup migrates your existing `rate-limit.conf` to a managed block
+  in one click; the rest of the file stays editable.
+- **Raw rate-limit editor** — direct textarea over `rate-limit.conf` for
+  anything the override UI doesn't cover. Saving from either UI runs
+  `nginx -t && nginx -s reload` inside the lancache container; if `nginx -t`
+  fails, the previous file is restored automatically.
 - **Single-password auth** — set `LCM_PASSWORD` and the dashboard requires login.
 - **No external dependencies** — pure-Go SQLite, single 15 MB distroless image.
 
@@ -109,17 +126,26 @@ After deploying:
 1. Trigger a download (Steam game install, Epic update, etc.) and confirm:
    - the throughput line chart climbs;
    - the client IP appears in the **Active downloads** table;
-   - the byte hit ratio updates as the cache warms.
-2. Make a trivial edit to `rate-limit.conf` (e.g. add a comment) and click
+   - the byte hit ratio updates as the cache warms;
+   - switching the range dropdown (5m / 1h / 24h / all) re-totals the stat
+     cards and reloads the chart.
+2. On the **Rate Limits** page, add a per-IP override (e.g. `10.0.0.5`,
+   total `100m`) and **Save**. Confirm the row appears in the table and that
+   `cat /opt/lancache/custom/rate-limit.conf` shows the IP inside the managed
+   `geo $lcm_rate_override { ... }` block. Clear the row and verify it falls
+   back to the global rate.
+3. Make a trivial edit in the raw editor (e.g. add a comment) and click
    **Apply & reload**. The output panel should show
    `nginx: configuration file ... test is successful` and
    `signal process started`.
-3. Introduce a deliberate syntax error (`limit_rate WHATEVER;`) and click
+4. Introduce a deliberate syntax error (`limit_rate WHATEVER;`) and click
    **Apply & reload**. The UI should report `nginx -t` failure and the file
    should be rolled back — verify with `cat /opt/lancache/custom/rate-limit.conf`.
-4. Restart the monitor (`docker compose restart lancache-monitor`) and confirm
-   the dashboard reloads with the last-24h chart still populated from SQLite.
-5. Rotate the access log (`mv access.log access.log.1 && touch access.log`) and
+5. Restart the monitor (`docker compose restart lancache-monitor`) and confirm
+   the dashboard reloads with the chart still populated from SQLite.
+6. Click **Clear all data** on the dashboard, confirm in the modal, and verify
+   the chart and stat cards reset to zero (new traffic should still flow in).
+7. Rotate the access log (`mv access.log access.log.1 && touch access.log`) and
    confirm the tailer picks up the new file within a few seconds.
 
 ## Tests
